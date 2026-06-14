@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#050608" />
+    <title>Nighttail: Exit 13</title>
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="game-canvas"></canvas>
+      <div id="vignette"></div>
+      <div id="blood-flash"></div>
+      <div id="jumpscare">
+        <div id="jumpscare-face">
+          <span class="ear left"></span>
+          <span class="ear right"></span>
+          <span class="eye left"></span>
+          <span class="eye right"></span>
+          <span class="muzzle"></span>
+          <span class="mouth"></span>
+        </div>
+      </div>
+
+      <section id="start-screen" class="screen">
+        <div class="title-block">
+          <p class="kicker">Exit 13</p>
+          <h1>Nighttail</h1>
+          <p class="objective">Find 3 keys. Get out.</p>
+          <button id="start-button" class="primary-button">Enter</button>
+        </div>
+      </section>
+
+      <section id="result-screen" class="screen hidden">
+        <div class="title-block compact">
+          <p id="result-kicker" class="kicker">Escaped</p>
+          <h2 id="result-title">You made it out.</h2>
+          <p id="result-copy" class="objective">The exit clicks open behind you.</p>
+          <button id="restart-button" class="primary-button">Retry</button>
+        </div>
+      </section>
+
+      <div id="hud" class="hidden">
+        <div id="top-bar">
+          <div class="meter">
+            <span>Fear</span>
+            <div class="meter-track"><i id="fear-fill"></i></div>
+          </div>
+          <div id="key-counter">Keys 0/3</div>
+        </div>
+        <div id="center-dot"></div>
+        <div id="message-feed"></div>
+      </div>
+
+      <div id="touch-layer" class="hidden">
+        <div id="joystick" class="stick"><span></span></div>
+        <button id="flashlight-button" class="round-button" aria-label="Toggle flashlight" title="Flashlight">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M7 3h10l-1.4 5.5h-7.2L7 3Z" />
+            <path d="M8.5 8.5h7l-1.2 11.2a1.5 1.5 0 0 1-1.5 1.3H11a1.5 1.5 0 0 1-1.5-1.3L8.5 8.5Z" />
+            <path d="M9 12h6" />
+          </svg>
+        </button>
+        <button id="spray-button" class="round-button fire" aria-label="Fire squirt gun" title="Squirt">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 9h8l2 2h4v4h-4.7l-1.5 5H9.2l1.3-5H8l-1.8 3H3.5L5 9Z" />
+            <path d="M13 7h5" />
+            <path d="M19 8.5c1.2.2 2.2 1.2 2.5 2.5" />
+          </svg>
+        </button>
+      </div>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
