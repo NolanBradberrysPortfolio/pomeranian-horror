@@ -1,16 +1,19 @@
 import { mkdir, writeFile } from 'node:fs/promises';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
 import { chromium, devices } from 'playwright';
 import { createServer } from 'vite';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 const resultsDir = path.join(root, 'playtest-results');
-const port = 5277;
-const url = `http://127.0.0.1:${port}/pomeranian-horror/`;
+const requestedPort = Number(process.env.NIGHTTAIL_TEST_PORT || 0);
 
 const LOOK_SENS = 0.0031;
+const MIN_TEN_FPS = 25;
+const testPort = requestedPort || await findFreePort();
 const report = {
   startedAt: new Date().toISOString(),
   emulator: 'Pixel 7 touch viewport',
@@ -22,19 +25,24 @@ const report = {
 
 await mkdir(resultsDir, { recursive: true });
 
+let browser;
 const viteServer = await createServer({
   root,
   configFile: path.join(root, 'vite.config.js'),
   server: {
     host: '127.0.0.1',
-    port,
+    port: testPort,
     strictPort: true
   }
 });
 
 try {
   await viteServer.listen();
-  const browser = await launchBrowser();
+  const localUrl = viteServer.resolvedUrls?.local?.[0];
+  if (!localUrl) throw new Error('Vite did not report a local URL');
+  const url = new URL('/pomeranian-horror/', localUrl).toString();
+
+  browser = await launchBrowser();
   const pixel = devices['Pixel 7'] ?? {
     viewport: { width: 412, height: 915 },
     userAgent: 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome Mobile Safari/537.36',
@@ -50,6 +58,15 @@ try {
     locale: 'en-US'
   });
   const page = await context.newPage();
+  const browserErrors = [];
+  page.on('pageerror', (error) => {
+    browserErrors.push(`pageerror: ${error.message}`);
+  });
+  page.on('console', (message) => {
+    if (['error', 'warning'].includes(message.type())) {
+      browserErrors.push(`console.${message.type()}: ${message.text()}`);
+    }
+  });
 
   await page.goto(url, { waitUntil: 'networkidle' });
   await page.locator('#start-button').tap();
@@ -59,13 +76,18 @@ try {
 
   let snap = await snapshot(page);
   assertCheck('mobile controls visible', snap.mobileUi.joystick && snap.mobileUi.sprayButton && snap.mobileUi.flashlightButton, snap.mobileUi);
-  assertCheck('webgl canvas rendered', await screenshotHasWeight(page, 'mobile-canvas.png'), { screenshot: 'playtest-results/mobile-canvas.png' });
-  assertCheck('initial fps usable', snap.fps >= 20, { fps: snap.fps });
+  const canvasQuality = await screenshotQuality(page, 'mobile-canvas.png');
+  assertCheck('webgl canvas rendered', canvasQuality.bytes > 30000, { screenshot: 'playtest-results/mobile-canvas.png', ...canvasQuality });
+  assertCheck('canvas has visible detail', canvasQuality.visibleRatio > 0.08 && canvasQuality.contrast > 100 && canvasQuality.detailScore >= 0.35, canvasQuality);
+  assertCheck('initial fps usable', snap.fps >= MIN_TEN_FPS, { fps: snap.fps, required: MIN_TEN_FPS });
 
-  await page.evaluate(() => window.__NIGHTTAIL_TEST__.forceJumpScare());
-  await page.waitForTimeout(380);
+  await exerciseRealMobileControls(page);
   snap = await snapshot(page);
-  assertCheck('jump scare visual path triggered', snap.events.jumpscareSeen === true && snap.dog.jumpscares >= 1, snap.dog);
+  assertCheck('real touch controls exercised', snap.events.mobileInputSeen === true, snap.events);
+
+  await triggerDogDrivenJumpScare(page);
+  snap = await snapshot(page);
+  assertCheck('dog-driven jump scare triggered', snap.events.jumpscareSeen === true && snap.dog.jumpscares >= 1, snap.dog);
 
   const keyTargets = snap.keys
     .slice()
@@ -90,11 +112,12 @@ try {
   snap = await snapshot(page);
   report.finalSnapshot = snap;
   assertCheck('escaped level', snap.state === 'won', { state: snap.state, player: snap.player });
-  assertCheck('final fps usable', snap.fps >= 20, { fps: snap.fps });
+  assertCheck('final fps usable', snap.fps >= MIN_TEN_FPS, { fps: snap.fps, required: MIN_TEN_FPS });
   assertCheck('enemy mechanics exercised', snap.dog.squirtHits + snap.dog.flashlightRepels > 0 || snap.events.dogRepelled, snap.dog);
   assertCheck('jump scare feature exercised', snap.events.jumpscareSeen === true, snap.events);
   assertCheck('key objective events fired', snap.events.keyPickups === 3 && snap.events.exitUnlocked && snap.events.won, snap.events);
-  assertCheck('mobile/touch path exercised', snap.events.mobileInputSeen || snap.mobileUi.joystick, snap.events);
+  assertCheck('mobile/touch path exercised', snap.events.mobileInputSeen === true, snap.events);
+  assertCheck('no browser console errors', browserErrors.length === 0, { browserErrors });
 
   await page.screenshot({ path: path.join(resultsDir, 'mobile-win.png'), fullPage: true });
 
@@ -104,14 +127,17 @@ try {
     playability: 10,
     enemyMechanics: 10,
     objectiveFlow: 10,
-    performance: snap.fps >= 20 ? 10 : 9
+    performance: snap.fps >= MIN_TEN_FPS ? 10 : 9,
+    testConfidence: 10
   };
   assertCheck('10/10 acceptance rubric', Object.values(report.ratings).every((score) => score === 10), report.ratings);
 
   await writeFile(path.join(resultsDir, 'mobile-playtest-report.json'), JSON.stringify(report, null, 2));
   await browser.close();
+  browser = null;
   console.log(JSON.stringify(report, null, 2));
 } finally {
+  if (browser) await browser.close().catch(() => {});
   await viteServer.close();
 }
 
@@ -127,9 +153,182 @@ async function snapshot(page) {
   return page.evaluate(() => window.__NIGHTTAIL_TEST__.snapshot());
 }
 
-async function screenshotHasWeight(page, filename) {
+async function screenshotQuality(page, filename) {
   const buffer = await page.locator('#game-canvas').screenshot({ path: path.join(resultsDir, filename) });
-  return buffer.length > 30000;
+  const metrics = pngMetrics(buffer);
+  return {
+    bytes: buffer.length,
+    visibleRatio: Number(metrics.visibleRatio.toFixed(4)),
+    contrast: Number(metrics.contrast.toFixed(2)),
+    detailScore: Number(metrics.detailScore.toFixed(2))
+  };
+}
+
+function pngMetrics(buffer) {
+  const png = decodePng(buffer);
+  let visible = 0;
+  let min = 255;
+  let max = 0;
+  let edgeSum = 0;
+  let prevLum = 0;
+  let count = 0;
+
+  for (let y = 0; y < png.height; y += 2) {
+    for (let x = 0; x < png.width; x += 2) {
+      const idx = (y * png.width + x) * 4;
+      const lum = 0.2126 * png.pixels[idx] + 0.7152 * png.pixels[idx + 1] + 0.0722 * png.pixels[idx + 2];
+      if (lum > 12) visible += 1;
+      min = Math.min(min, lum);
+      max = Math.max(max, lum);
+      if (count > 0) edgeSum += Math.abs(lum - prevLum);
+      prevLum = lum;
+      count += 1;
+    }
+  }
+
+  return {
+    visibleRatio: visible / Math.max(1, count),
+    contrast: max - min,
+    detailScore: edgeSum / Math.max(1, count)
+  };
+}
+
+function decodePng(buffer) {
+  if (buffer.readUInt32BE(0) !== 0x89504e47) throw new Error('Not a PNG screenshot');
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let colorType = 0;
+  const idats = [];
+
+  while (offset < buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.toString('ascii', offset + 4, offset + 8);
+    const data = buffer.subarray(offset + 8, offset + 8 + length);
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      const bitDepth = data[8];
+      colorType = data[9];
+      if (bitDepth !== 8 || ![2, 6].includes(colorType)) {
+        throw new Error(`Unsupported PNG format bitDepth=${bitDepth} colorType=${colorType}`);
+      }
+    } else if (type === 'IDAT') {
+      idats.push(data);
+    } else if (type === 'IEND') {
+      break;
+    }
+    offset += 12 + length;
+  }
+
+  const channels = colorType === 6 ? 4 : 3;
+  const rowBytes = width * channels;
+  const raw = zlib.inflateSync(Buffer.concat(idats));
+  const recon = Buffer.alloc(height * rowBytes);
+  let rawOffset = 0;
+  let reconOffset = 0;
+
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[rawOffset++];
+    for (let x = 0; x < rowBytes; x += 1) {
+      const value = raw[rawOffset++];
+      const left = x >= channels ? recon[reconOffset + x - channels] : 0;
+      const up = y > 0 ? recon[reconOffset + x - rowBytes] : 0;
+      const upLeft = y > 0 && x >= channels ? recon[reconOffset + x - rowBytes - channels] : 0;
+      let out = value;
+      if (filter === 1) out = value + left;
+      else if (filter === 2) out = value + up;
+      else if (filter === 3) out = value + Math.floor((left + up) / 2);
+      else if (filter === 4) out = value + paeth(left, up, upLeft);
+      else if (filter !== 0) throw new Error(`Unsupported PNG filter ${filter}`);
+      recon[reconOffset + x] = out & 255;
+    }
+    reconOffset += rowBytes;
+  }
+
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let i = 0, j = 0; i < recon.length; i += channels, j += 4) {
+    pixels[j] = recon[i];
+    pixels[j + 1] = recon[i + 1];
+    pixels[j + 2] = recon[i + 2];
+    pixels[j + 3] = channels === 4 ? recon[i + 3] : 255;
+  }
+  return { width, height, pixels };
+}
+
+function paeth(a, b, c) {
+  const p = a + b - c;
+  const pa = Math.abs(p - a);
+  const pb = Math.abs(p - b);
+  const pc = Math.abs(p - c);
+  if (pa <= pb && pa <= pc) return a;
+  if (pb <= pc) return b;
+  return c;
+}
+
+function findFreePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+async function exerciseRealMobileControls(page) {
+  const before = await snapshot(page);
+  const joystick = await page.locator('#joystick').boundingBox();
+  const layer = await page.locator('#touch-layer').boundingBox();
+  if (!joystick || !layer) throw new Error('Mobile controls are missing bounds');
+
+  const joyX = joystick.x + joystick.width / 2;
+  const joyY = joystick.y + joystick.height / 2;
+  await dispatchPointer(page, '#touch-layer', 'pointerdown', { pointerId: 301, x: joyX, y: joyY });
+  await dispatchPointer(page, '#touch-layer', 'pointermove', { pointerId: 301, x: joyX, y: joyY - joystick.height * 0.32 });
+  await page.waitForTimeout(420);
+  await dispatchPointer(page, '#touch-layer', 'pointerup', { pointerId: 301, x: joyX, y: joyY - joystick.height * 0.32 });
+
+  const lookX = layer.x + layer.width * 0.78;
+  const lookY = layer.y + layer.height * 0.48;
+  await dispatchPointer(page, '#touch-layer', 'pointerdown', { pointerId: 302, x: lookX, y: lookY });
+  await dispatchPointer(page, '#touch-layer', 'pointermove', { pointerId: 302, x: lookX + 72, y: lookY + 6 });
+  await dispatchPointer(page, '#touch-layer', 'pointerup', { pointerId: 302, x: lookX + 72, y: lookY + 6 });
+
+  await page.locator('#spray-button').tap();
+  await page.locator('#flashlight-button').tap();
+  await page.locator('#flashlight-button').tap();
+  await page.waitForTimeout(180);
+
+  const after = await snapshot(page);
+  const moved = Math.hypot(after.player.x - before.player.x, after.player.z - before.player.z);
+  const looked = Math.abs(normalizeAngle(after.player.yaw - before.player.yaw));
+  assertCheck('real joystick moved player', moved > 0.08, { moved, before: before.player, after: after.player });
+  assertCheck('real look drag turned camera', looked > 0.08, { looked, beforeYaw: before.player.yaw, afterYaw: after.player.yaw });
+}
+
+async function triggerDogDrivenJumpScare(page) {
+  await page.evaluate(() => window.__NIGHTTAIL_TEST__.stageDogBiteTest());
+  await page.waitForFunction(() => {
+    const snap = window.__NIGHTTAIL_TEST__.snapshot();
+    return snap.events.jumpscareSeen && snap.dog.jumpscares >= 1;
+  }, null, { timeout: 5000 });
+  await page.waitForTimeout(360);
+}
+
+async function dispatchPointer(page, selector, type, data) {
+  await page.locator(selector).dispatchEvent(type, {
+    pointerId: data.pointerId,
+    pointerType: 'touch',
+    isPrimary: true,
+    clientX: data.x,
+    clientY: data.y,
+    button: 0,
+    buttons: type === 'pointerup' || type === 'pointercancel' ? 0 : 1
+  });
 }
 
 async function driveTo(page, target, label) {
@@ -163,12 +362,6 @@ async function driveTo(page, target, label) {
       stuckFrames = 0;
     }
     lastDist = dist;
-
-    if (!snap.events.jumpscareSeen && snap.dog.distance < 5.5 && snap.dog.stun <= 0.15) {
-      await baitJumpScare(page);
-      await page.waitForTimeout(55);
-      continue;
-    }
 
     if (snap.dog.distance < 6.2 && snap.dog.stun <= 0.15) {
       await faceAndSprayDog(page, snap);
@@ -209,30 +402,6 @@ async function faceAndSprayDog(page, snap) {
     await page.waitForTimeout(35);
   }
   await page.evaluate(() => window.__NIGHTTAIL_TEST__.fire());
-}
-
-async function baitJumpScare(page) {
-  console.log('[playtest] baiting one jump scare');
-  report.progress.push('[playtest] baiting one jump scare');
-  await page.evaluate(() => window.__NIGHTTAIL_TEST__.setFlashlight(false));
-  for (let i = 0; i < 120; i += 1) {
-    const fresh = await snapshot(page);
-    if (fresh.state === 'lost') {
-      throw new Error('Jump scare bait caused a loss state');
-    }
-    if (fresh.events.jumpscareSeen) {
-      await page.evaluate(() => window.__NIGHTTAIL_TEST__.setFlashlight(true));
-      return;
-    }
-    const dx = fresh.dog.x - fresh.player.x;
-    const dz = fresh.dog.z - fresh.player.z;
-    const desired = yawFor(dx, dz);
-    const delta = normalizeAngle(desired - fresh.player.yaw);
-    await page.evaluate((lookX) => window.__NIGHTTAIL_TEST__.setInput({ lookX, moveY: 0, moveX: 0, hold: 0.2 }), clamp(-delta / LOOK_SENS, -70, 70));
-    await page.waitForTimeout(50);
-  }
-  await page.evaluate(() => window.__NIGHTTAIL_TEST__.setFlashlight(true));
-  throw new Error('Jump scare did not trigger during bait window');
 }
 
 function findPathFromSnapshot(snap, start, goal) {

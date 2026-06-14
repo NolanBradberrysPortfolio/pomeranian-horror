@@ -46,39 +46,41 @@ const keyCells = [
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x040606);
-scene.fog = new THREE.FogExp2(0x030505, 0.026);
+scene.fog = new THREE.FogExp2(0x030505, 0.02);
 
 const camera = new THREE.PerspectiveCamera(73, window.innerWidth / window.innerHeight, 0.03, 85);
 camera.rotation.order = 'YXZ';
 
+const isMobileLike = matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 const renderer = new THREE.WebGLRenderer({
   canvas,
-  antialias: true,
+  antialias: !isMobileLike,
   powerPreference: 'high-performance'
 });
-renderer.shadowMap.enabled = true;
+renderer.shadowMap.enabled = !isMobileLike;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 
-const isMobileLike = matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-const maxDpr = isMobileLike ? 1.45 : 1.85;
+const maxDpr = isMobileLike ? 1.25 : 1.85;
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
 renderer.setSize(window.innerWidth, window.innerHeight, false);
 
 let composer = null;
 let bloomPass = null;
 try {
-  composer = new EffectComposer(renderer);
-  composer.addPass(new RenderPass(scene, camera));
-  bloomPass = new UnrealBloomPass(
-    new THREE.Vector2(window.innerWidth, window.innerHeight),
-    isMobileLike ? 0.16 : 0.22,
-    0.35,
-    0.72
-  );
-  composer.addPass(bloomPass);
+  if (!isMobileLike) {
+    composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      0.22,
+      0.35,
+      0.72
+    );
+    composer.addPass(bloomPass);
+  }
 } catch {
   composer = null;
 }
@@ -102,16 +104,19 @@ const sprayGroup = new THREE.Group();
 const dogGroup = new THREE.Group();
 scene.add(wallGroup, propGroup, keyGroup, sprayGroup, dogGroup);
 
-const ambient = new THREE.HemisphereLight(0xcbd6c7, 0x080705, 0.19);
+const ambient = new THREE.HemisphereLight(0xd4dfcf, 0x080705, 0.31);
 scene.add(ambient);
 
-const flashlight = new THREE.SpotLight(0xfff4ce, 55, 24, Math.PI / 7.2, 0.64, 1.55);
-flashlight.castShadow = true;
+const flashlight = new THREE.SpotLight(0xfff4ce, 78, 28, Math.PI / 6.3, 0.58, 1.42);
+flashlight.castShadow = !isMobileLike;
 flashlight.shadow.mapSize.set(isMobileLike ? 512 : 1024, isMobileLike ? 512 : 1024);
 flashlight.shadow.camera.near = 0.15;
 flashlight.shadow.camera.far = 22;
 flashlight.target.position.set(0, 0, -1);
 scene.add(flashlight, flashlight.target);
+
+const flashlightSpill = new THREE.PointLight(0xffedc9, 0.72, 7.5, 1.35);
+scene.add(flashlightSpill);
 
 const flashlightVolume = createFlashlightVolume();
 scene.add(flashlightVolume);
@@ -824,13 +829,21 @@ function onTouchPointerDown(event) {
 
   if (event.clientX < window.innerWidth * 0.48 && input.joystickPointer === null) {
     input.joystickPointer = event.pointerId;
-    touchLayer.setPointerCapture?.(event.pointerId);
+    safePointerCapture(event.pointerId);
     updateJoystick(event);
   } else if (input.lookPointer === null) {
     input.lookPointer = event.pointerId;
     input.lookLast.x = event.clientX;
     input.lookLast.y = event.clientY;
-    touchLayer.setPointerCapture?.(event.pointerId);
+    safePointerCapture(event.pointerId);
+  }
+}
+
+function safePointerCapture(pointerId) {
+  try {
+    touchLayer.setPointerCapture?.(pointerId);
+  } catch {
+    // Synthetic test events and a few browser edge cases can lack an active pointer.
   }
 }
 
@@ -888,6 +901,11 @@ function startGame() {
 }
 
 function resetGame(showStart) {
+  for (const particle of runtime.sprayParticles) {
+    sprayGroup.remove(particle);
+    particle.geometry.dispose();
+  }
+
   player.pos.copy(cellToWorldVector(startCell.c, startCell.r, PLAYER_HEIGHT));
   player.yaw = -Math.PI / 2;
   player.pitch = 0;
@@ -929,11 +947,23 @@ function resetGame(showStart) {
 
   input.flashlightOn = true;
   input.sprayCooldown = 0;
+  input.moveX = 0;
+  input.moveY = 0;
+  input.lookX = 0;
+  input.lookY = 0;
   input.testMoveX = 0;
   input.testMoveY = 0;
   input.testLookX = 0;
   input.testLookY = 0;
   input.testUntil = 0;
+  input.joystickPointer = null;
+  input.lookPointer = null;
+  input.keys.clear();
+  joystickKnob.style.transform = 'translate(-50%, -50%)';
+  sprayButton.disabled = false;
+  sprayButton.style.opacity = '1';
+  jumpscare.classList.remove('active');
+  bloodFlash.classList.remove('active');
   flashlightButton.classList.add('active');
 
   for (const key of keys) {
@@ -955,6 +985,7 @@ function resetGame(showStart) {
 }
 
 function finishGame(win) {
+  if (runtime.state === 'won' || runtime.state === 'lost') return;
   runtime.state = win ? 'won' : 'lost';
   runtime.scoreEvents.won = win;
   resultKicker.textContent = win ? 'Escaped' : 'Caught';
@@ -987,9 +1018,17 @@ function update(dt) {
     applyLook(dt);
     movePlayer(dt);
     updateKeys(dt);
+  }
+  if (runtime.state === 'playing') {
     updateDog(dt);
+  }
+  if (runtime.state === 'playing') {
     updateSpray(dt);
+  }
+  if (runtime.state === 'playing') {
     updateExit(dt);
+  }
+  if (runtime.state === 'playing') {
     updateHud(dt);
   }
 
@@ -1072,6 +1111,7 @@ function updateCamera(dt) {
 
 function updateFlashlight() {
   flashlight.visible = input.flashlightOn;
+  flashlightSpill.visible = input.flashlightOn;
   const showVolume = input.flashlightOn && !isMobileLike && window.innerWidth > 700;
   flashlightVolume.visible = showVolume;
   flashlightButton.classList.toggle('active', input.flashlightOn);
@@ -1079,12 +1119,14 @@ function updateFlashlight() {
   const forward = new THREE.Vector3();
   camera.getWorldDirection(forward);
   flashlight.position.copy(camera.position);
+  flashlightSpill.position.copy(camera.position);
   flashlight.target.position.copy(camera.position).addScaledVector(forward, 12);
 
   flashlightVolume.position.copy(camera.position).addScaledVector(forward, 0.15);
   flashlightVolume.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), forward.clone().normalize());
   const flicker = 0.92 + Math.sin(runtime.time * 17.3) * 0.035 + Math.sin(runtime.time * 41.7) * 0.02;
-  flashlight.intensity = input.flashlightOn ? 55 * flicker : 0;
+  flashlight.intensity = input.flashlightOn ? 78 * flicker : 0;
+  flashlightSpill.intensity = input.flashlightOn ? 0.72 * flicker : 0;
   flashlightVolume.material.opacity = showVolume ? 0.04 + Math.sin(runtime.time * 15) * 0.008 : 0;
 }
 
@@ -1238,7 +1280,7 @@ function updateDogThreat(dt) {
     const shove = player.pos.clone().sub(dog.pos).setY(0);
     if (shove.lengthSq() > 0.001) {
       shove.normalize().multiplyScalar(0.7);
-      player.pos.add(shove);
+      tryMove(shove.x, shove.z);
     }
   }
 
@@ -1606,7 +1648,6 @@ window.__NIGHTTAIL_TEST__ = {
     startGame();
   },
   setInput(next) {
-    runtime.scoreEvents.mobileInputSeen = true;
     input.testMoveX = clamp(next.moveX ?? 0, -1, 1);
     input.testMoveY = clamp(next.moveY ?? 0, -1, 1);
     input.testLookX = clamp(next.lookX ?? 0, -90, 90);
@@ -1616,14 +1657,20 @@ window.__NIGHTTAIL_TEST__ = {
   fire() {
     fireSquirt();
   },
-  forceJumpScare() {
-    dog.jumpscares += 1;
-    runtime.scoreEvents.jumpscareSeen = true;
-    player.shake = Math.max(player.shake, 1.1);
-    triggerJumpScare();
+  stageDogBiteTest() {
+    const flatPlayer = new THREE.Vector3(player.pos.x, 0, player.pos.z);
+    dog.pos.copy(flatPlayer).addScaledVector(getFlatForward(), 0.82);
+    dog.vel.set(0, 0, 0);
+    dog.path = [];
+    dog.pathTimer = 0;
+    dog.stun = 0;
+    dog.retreat = 0;
+    dog.biteCooldown = 0;
+    dog.lastDistance = flatDistance(player.pos, dog.pos);
+    dogGroup.position.copy(dog.pos);
+    player.fear = Math.min(player.fear, 20);
   },
   setFlashlight(on) {
-    runtime.scoreEvents.mobileInputSeen = true;
     input.flashlightOn = Boolean(on);
   },
   snapshot() {
