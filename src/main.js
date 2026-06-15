@@ -381,11 +381,11 @@ function createMaterials() {
     wire: new THREE.MeshStandardMaterial({ color: 0x060606, roughness: 0.55, metalness: 0.5 }),
     warning: new THREE.MeshStandardMaterial({ color: 0x7f6b24, roughness: 0.74, metalness: 0.18, emissive: 0x1d1203, emissiveIntensity: 0.12 }),
     wet: new THREE.MeshStandardMaterial({ color: 0x1a2526, roughness: 0.38, metalness: 0.05, transparent: true, opacity: 0.62 }),
-    fur: new THREE.MeshStandardMaterial({ color: 0x5b331f, roughness: 0.98, metalness: 0.0 }),
-    furDark: new THREE.MeshStandardMaterial({ color: 0x2a160d, roughness: 0.98, metalness: 0.0 }),
-    furLight: new THREE.MeshStandardMaterial({ color: 0xe8d7bf, roughness: 0.95, metalness: 0.0 }),
-    furCoffee: new THREE.MeshStandardMaterial({ color: 0xa87345, roughness: 0.96, metalness: 0.0 }),
-    muzzle: new THREE.MeshStandardMaterial({ color: 0xd9bea1, roughness: 0.92, metalness: 0.0 }),
+    fur: new THREE.MeshStandardMaterial({ color: 0x6b4226, roughness: 0.98, metalness: 0.0 }),
+    furDark: new THREE.MeshStandardMaterial({ color: 0x2a1b12, roughness: 0.98, metalness: 0.0 }),
+    furLight: new THREE.MeshStandardMaterial({ color: 0xf4f0e6, roughness: 0.95, metalness: 0.0 }),
+    furCoffee: new THREE.MeshStandardMaterial({ color: 0x8b6c42, roughness: 0.96, metalness: 0.0 }),
+    muzzle: new THREE.MeshStandardMaterial({ color: 0xa0845c, roughness: 0.92, metalness: 0.0 }),
     tooth: new THREE.MeshStandardMaterial({ color: 0xfff1d2, roughness: 0.62, metalness: 0.0, emissive: 0x2a1809, emissiveIntensity: 0.08 }),
     eye: new THREE.MeshStandardMaterial({ color: 0x0d0704, roughness: 0.36, metalness: 0.0, emissive: 0xffc36b, emissiveIntensity: 0.08 }),
     water: new THREE.MeshStandardMaterial({ color: 0x9be8ff, roughness: 0.2, metalness: 0.0, transparent: true, opacity: 0.68, emissive: 0x17485a, emissiveIntensity: 0.3 })
@@ -887,15 +887,15 @@ function createDog() {
   head.castShadow = true;
   dogGroup.add(head);
 
-  const whiteFace = new THREE.Mesh(new THREE.SphereGeometry(0.22, 22, 14), materials.furLight);
-  whiteFace.scale.set(0.62, 1.04, 0.24);
-  whiteFace.position.set(0, 0.89, -0.82);
-  whiteFace.castShadow = true;
-  dogGroup.add(whiteFace);
+  const foreheadPatch = new THREE.Mesh(new THREE.SphereGeometry(0.2, 22, 14), materials.furDark);
+  foreheadPatch.scale.set(0.74, 0.76, 0.2);
+  foreheadPatch.position.set(0, 0.98, -0.81);
+  foreheadPatch.castShadow = true;
+  dogGroup.add(foreheadPatch);
 
   const cheekGeometry = new THREE.SphereGeometry(0.15, 18, 12);
   for (const x of [-0.17, 0.17]) {
-    const cheek = new THREE.Mesh(cheekGeometry, materials.furLight);
+    const cheek = new THREE.Mesh(cheekGeometry, materials.muzzle);
     cheek.scale.set(0.78, 0.56, 0.42);
     cheek.position.set(x, 0.76, -0.79);
     cheek.castShadow = true;
@@ -917,19 +917,19 @@ function createDog() {
   tooth.rotation.set(Math.PI, 0.08, -0.08);
   dogGroup.add(tooth);
 
-  const earGeometry = new THREE.CapsuleGeometry(0.09, 0.42, 6, 12);
-  const leftEar = new THREE.Mesh(earGeometry, materials.furDark);
-  leftEar.position.set(-0.3, 0.88, -0.5);
-  leftEar.rotation.set(0.85, 0.24, 0.58);
-  leftEar.scale.set(0.8, 1, 0.46);
+  const earGeometry = new THREE.ConeGeometry(0.13, 0.48, 4, 1);
+  const leftEar = new THREE.Mesh(earGeometry, materials.fur);
+  leftEar.position.set(-0.25, 1.1, -0.5);
+  leftEar.rotation.set(0.18, 0.08, -0.42);
+  leftEar.scale.set(0.78, 1, 0.48);
   leftEar.userData.baseRotation = leftEar.rotation.clone();
   leftEar.userData.ear = true;
   leftEar.castShadow = true;
   dogGroup.add(leftEar);
 
   const rightEar = leftEar.clone();
-  rightEar.position.x = 0.3;
-  rightEar.rotation.set(0.85, -0.24, -0.58);
+  rightEar.position.x = 0.25;
+  rightEar.rotation.set(0.18, -0.08, 0.42);
   rightEar.userData.baseRotation = rightEar.rotation.clone();
   rightEar.userData.ear = true;
   dogGroup.add(rightEar);
@@ -944,7 +944,7 @@ function createDog() {
   const legGeometry = new THREE.CapsuleGeometry(0.062, 0.31, 6, 10);
   for (const x of [-0.32, 0.32]) {
     for (const z of [-0.29, 0.32]) {
-      const leg = new THREE.Mesh(legGeometry, z < 0 ? materials.furLight : materials.fur);
+      const leg = new THREE.Mesh(legGeometry, z < 0 ? materials.muzzle : materials.fur);
       leg.position.set(x, 0.18, z);
       leg.castShadow = true;
       dogGroup.add(leg);
@@ -957,7 +957,7 @@ function createDog() {
     }
   }
 
-  const tail = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.42, 6, 12), materials.furLight);
+  const tail = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.42, 6, 12), materials.fur);
   tail.position.set(0, 0.66, 0.58);
   tail.rotation.set(1.05, 0.1, Math.PI / 2);
   tail.userData.baseRotation = tail.rotation.clone();
@@ -967,7 +967,7 @@ function createDog() {
 
   const tuftGeometry = new THREE.ConeGeometry(0.032, 0.13, 6);
   for (let i = 0; i < 44; i += 1) {
-    const mat = i % 5 === 0 ? materials.furLight : i % 4 === 0 ? materials.furDark : materials.fur;
+    const mat = i % 9 === 0 ? materials.furLight : i % 4 === 0 ? materials.furDark : materials.fur;
     const tuft = new THREE.Mesh(tuftGeometry, mat);
     const angle = rng() * Math.PI * 2;
     const radius = 0.23 + rng() * 0.25;
@@ -978,6 +978,25 @@ function createDog() {
     tuft.userData.furTuft = true;
     tuft.castShadow = true;
     dogGroup.add(tuft);
+  }
+
+  const fleckGeometry = new THREE.SphereGeometry(0.034, 10, 8);
+  const flecks = [
+    [-0.28, 0.58, -0.18, 1.2, 0.42, 0.78],
+    [0.24, 0.55, -0.03, 0.88, 0.38, 0.68],
+    [-0.12, 0.63, 0.22, 0.72, 0.32, 0.62],
+    [0.36, 0.4, 0.24, 0.7, 0.3, 0.54],
+    [-0.08, 0.9, -0.86, 0.54, 0.32, 0.26],
+    [0.14, 0.83, -0.89, 0.46, 0.3, 0.22],
+    [-0.29, 0.05, -0.32, 0.7, 0.26, 0.48],
+    [0.31, 0.05, 0.31, 0.62, 0.24, 0.42]
+  ];
+  for (const [x, y, z, sx, sy, sz] of flecks) {
+    const fleck = new THREE.Mesh(fleckGeometry, materials.furLight);
+    fleck.scale.set(sx, sy, sz);
+    fleck.position.set(x, y, z);
+    fleck.castShadow = true;
+    dogGroup.add(fleck);
   }
 
   const dogEyeLight = new THREE.PointLight(0xffb36b, 0.13, 1.35, 1.9);
@@ -1013,25 +1032,59 @@ function makeDaisyApparitionTexture() {
   ctx.ellipse(256, 296, 124, 154, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = 'rgba(34, 13, 5, 0.98)';
+  ctx.fillStyle = 'rgba(107, 66, 38, 0.98)';
   ctx.beginPath();
-  ctx.ellipse(145, 228, 54, 140, -0.36, 0, Math.PI * 2);
-  ctx.ellipse(367, 228, 54, 140, 0.36, 0, Math.PI * 2);
+  ctx.moveTo(158, 214);
+  ctx.lineTo(122, 72);
+  ctx.lineTo(206, 146);
+  ctx.closePath();
+  ctx.moveTo(354, 214);
+  ctx.lineTo(390, 72);
+  ctx.lineTo(306, 146);
+  ctx.closePath();
   ctx.fill();
 
-  ctx.fillStyle = 'rgba(99, 45, 18, 0.96)';
+  ctx.fillStyle = 'rgba(160, 132, 92, 0.9)';
+  ctx.beginPath();
+  ctx.moveTo(157, 183);
+  ctx.lineTo(139, 109);
+  ctx.lineTo(184, 150);
+  ctx.closePath();
+  ctx.moveTo(355, 183);
+  ctx.lineTo(373, 109);
+  ctx.lineTo(328, 150);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = 'rgba(139, 108, 66, 0.96)';
   ctx.beginPath();
   ctx.ellipse(256, 232, 134, 126, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = 'rgba(230, 207, 169, 0.94)';
+  ctx.fillStyle = 'rgba(42, 27, 18, 0.9)';
+  ctx.beginPath();
+  ctx.ellipse(256, 186, 72, 44, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = 'rgba(160, 132, 92, 0.94)';
   ctx.beginPath();
   ctx.ellipse(256, 302, 82, 62, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.beginPath();
-  ctx.ellipse(256, 206, 28, 86, 0, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.fillStyle = 'rgba(244, 240, 230, 0.82)';
+  for (const [x, y, r] of [
+    [202, 282, 8],
+    [316, 276, 7],
+    [238, 344, 6],
+    [296, 350, 8],
+    [186, 214, 5],
+    [334, 221, 5],
+    [252, 176, 4]
+  ]) {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   ctx.fillStyle = 'rgba(4, 2, 1, 0.98)';
   ctx.beginPath();
@@ -1045,7 +1098,7 @@ function makeDaisyApparitionTexture() {
   ctx.quadraticCurveTo(256, 335, 269, 322);
   ctx.stroke();
 
-  ctx.fillStyle = 'rgba(255, 243, 217, 0.96)';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
   ctx.beginPath();
   ctx.moveTo(280, 320);
   ctx.lineTo(309, 321);
