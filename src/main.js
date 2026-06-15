@@ -4,6 +4,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
+const app = document.querySelector('#app');
 const canvas = document.querySelector('#game-canvas');
 const startScreen = document.querySelector('#start-screen');
 const resultScreen = document.querySelector('#result-screen');
@@ -23,6 +24,8 @@ const keyCounter = document.querySelector('#key-counter');
 const messageFeed = document.querySelector('#message-feed');
 const jumpscare = document.querySelector('#jumpscare');
 const bloodFlash = document.querySelector('#blood-flash');
+const TEST_MODE = new URLSearchParams(window.location.search).has('test')
+  && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname);
 
 const CELL = 3;
 const ROWS = 17;
@@ -32,7 +35,7 @@ const PLAYER_HEIGHT = 1.62;
 const PLAYER_RADIUS = 0.42;
 const MOVE_SPEED = 3.05;
 const LOOK_SENS = 0.0031;
-const DOG_RADIUS = 0.38;
+const DOG_RADIUS = 0.22;
 const KEY_TOTAL = 3;
 
 const startCell = { c: 1, r: 1 };
@@ -103,6 +106,7 @@ const keyGroup = new THREE.Group();
 const sprayGroup = new THREE.Group();
 const dogGroup = new THREE.Group();
 scene.add(wallGroup, propGroup, keyGroup, sprayGroup, dogGroup);
+let dogPhotoCard = null;
 
 const ambient = new THREE.HemisphereLight(0xd4dfcf, 0x080705, 0.31);
 scene.add(ambient);
@@ -177,6 +181,7 @@ const runtime = {
   fps: 60,
   fpsTimer: 0,
   fpsFrames: 0,
+  threat: 0,
   scoreEvents: {
     keyPickups: 0,
     exitUnlocked: false,
@@ -186,6 +191,21 @@ const runtime = {
     mobileInputSeen: false
   }
 };
+const effectTimers = new Set();
+
+function scheduleEffect(callback, delay) {
+  const id = window.setTimeout(() => {
+    effectTimers.delete(id);
+    callback();
+  }, delay);
+  effectTimers.add(id);
+  return id;
+}
+
+function clearEffectTimers() {
+  for (const id of effectTimers) window.clearTimeout(id);
+  effectTimers.clear();
+}
 
 const keys = [];
 let exitDoor = null;
@@ -195,9 +215,9 @@ buildWorld();
 createExit();
 createKeys();
 createDog();
+createDogPhotoCard();
 resetGame(false);
 attachControls();
-animate();
 
 function createLevelGrid() {
   const level = Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => '.'));
@@ -305,8 +325,8 @@ function buildWorld() {
 }
 
 function createMaterials() {
-  const wallTexture = makeConcreteTexture(512);
-  const floorTexture = makeFloorTexture(512);
+  const wallTexture = loadAssetTexture('abandoned-wall.png');
+  const floorTexture = loadAssetTexture('abandoned-floor.png');
   const ceilingTexture = makeCeilingTexture(512);
 
   for (const texture of [wallTexture, floorTexture, ceilingTexture]) {
@@ -345,13 +365,29 @@ function createMaterials() {
     exitUnlocked: new THREE.MeshStandardMaterial({ color: 0x516b46, roughness: 0.55, metalness: 0.14, emissive: 0x243f1b, emissiveIntensity: 0.35 }),
     darkMetal: new THREE.MeshStandardMaterial({ color: 0x181c1e, roughness: 0.52, metalness: 0.78 }),
     crate: new THREE.MeshStandardMaterial({ color: 0x66513b, roughness: 0.86, metalness: 0.02 }),
+    paper: new THREE.MeshStandardMaterial({ color: 0xc9c1a8, roughness: 0.93, metalness: 0.01 }),
+    fabric: new THREE.MeshStandardMaterial({ color: 0x35423c, roughness: 0.97, metalness: 0.0 }),
+    stain: new THREE.MeshBasicMaterial({ color: 0x190d09, transparent: true, opacity: 0.56, depthWrite: false }),
+    wire: new THREE.MeshStandardMaterial({ color: 0x060606, roughness: 0.55, metalness: 0.5 }),
+    warning: new THREE.MeshStandardMaterial({ color: 0x7f6b24, roughness: 0.74, metalness: 0.18, emissive: 0x1d1203, emissiveIntensity: 0.12 }),
     wet: new THREE.MeshStandardMaterial({ color: 0x1a2526, roughness: 0.38, metalness: 0.05, transparent: true, opacity: 0.62 }),
-    fur: new THREE.MeshStandardMaterial({ color: 0x6d3d20, roughness: 0.96, metalness: 0.0 }),
-    furLight: new THREE.MeshStandardMaterial({ color: 0xc0844a, roughness: 0.92, metalness: 0.0 }),
-    muzzle: new THREE.MeshStandardMaterial({ color: 0xd3a06d, roughness: 0.9, metalness: 0.0 }),
+    fur: new THREE.MeshStandardMaterial({ color: 0x5b331f, roughness: 0.98, metalness: 0.0 }),
+    furDark: new THREE.MeshStandardMaterial({ color: 0x2a160d, roughness: 0.98, metalness: 0.0 }),
+    furLight: new THREE.MeshStandardMaterial({ color: 0xe8d7bf, roughness: 0.95, metalness: 0.0 }),
+    furCoffee: new THREE.MeshStandardMaterial({ color: 0xa87345, roughness: 0.96, metalness: 0.0 }),
+    muzzle: new THREE.MeshStandardMaterial({ color: 0xd9bea1, roughness: 0.92, metalness: 0.0 }),
     eye: new THREE.MeshStandardMaterial({ color: 0x0d0704, roughness: 0.36, metalness: 0.0, emissive: 0xffc36b, emissiveIntensity: 0.08 }),
     water: new THREE.MeshStandardMaterial({ color: 0x9be8ff, roughness: 0.2, metalness: 0.0, transparent: true, opacity: 0.68, emissive: 0x17485a, emissiveIntensity: 0.3 })
   };
+}
+
+function loadAssetTexture(filename) {
+  const texture = new THREE.TextureLoader().load(`${import.meta.env.BASE_URL}assets/${filename}`);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  return texture;
 }
 
 function makeConcreteTexture(size) {
@@ -570,6 +606,174 @@ function addPropsAndDebris() {
     mesh.translateZ(-CELL * 0.48);
     propGroup.add(mesh);
   }
+
+  addFixedSetDressing();
+  addWallDecals();
+}
+
+function addFixedSetDressing() {
+  const box = new THREE.BoxGeometry(1, 1, 1);
+  const plank = new THREE.BoxGeometry(1.65, 0.12, 0.16);
+  const mattress = new THREE.BoxGeometry(1.45, 0.18, 2.1);
+  const chairSeat = new THREE.BoxGeometry(0.62, 0.08, 0.58);
+  const chairBack = new THREE.BoxGeometry(0.62, 0.72, 0.08);
+  const leg = new THREE.CylinderGeometry(0.035, 0.035, 0.58, 8);
+  const stain = new THREE.CircleGeometry(0.72, 24);
+
+  const cabinets = [
+    { c: 5, r: 2, rot: 0.1 },
+    { c: 15, r: 4, rot: Math.PI * 0.52 },
+    { c: 22, r: 9, rot: -0.35 }
+  ];
+  for (const spec of cabinets) {
+    const pos = cellToWorld(spec.c, spec.r);
+    addBox(box, materials.darkMetal, pos.x, 0.74, pos.z, 0.92, 1.48, 0.48, spec.rot);
+    addBox(box, materials.paper, pos.x + Math.cos(spec.rot) * 0.05, 1.16, pos.z + Math.sin(spec.rot) * 0.05, 0.72, 0.06, 0.07, spec.rot);
+  }
+
+  const rooms = [
+    { c: 10, r: 4, rot: -0.25 },
+    { c: 4, r: 11, rot: 0.55 },
+    { c: 20, r: 14, rot: -0.5 }
+  ];
+  for (const spec of rooms) {
+    const pos = cellToWorld(spec.c, spec.r);
+    addBox(mattress, materials.fabric, pos.x - 0.35, 0.13, pos.z + 0.18, 1, 1, 1, spec.rot);
+    addBox(box, materials.paper, pos.x + 0.55, 0.25, pos.z - 0.55, 0.78, 0.08, 0.48, spec.rot + 0.2);
+    addStain(stain, pos.x + 0.2, pos.z + 0.7, 1.1, 0.46, spec.rot + 0.1);
+  }
+
+  const chairs = [
+    { c: 8, r: 8, rot: 0.8 },
+    { c: 17, r: 6, rot: -0.55 },
+    { c: 14, r: 12, rot: 2.2 },
+    { c: 21, r: 3, rot: -1.1 }
+  ];
+  for (const spec of chairs) {
+    const pos = cellToWorld(spec.c, spec.r);
+    addBox(chairSeat, materials.crate, pos.x, 0.42, pos.z, 1, 1, 1, spec.rot);
+    addBox(chairBack, materials.crate, pos.x - Math.sin(spec.rot) * 0.32, 0.78, pos.z - Math.cos(spec.rot) * 0.32, 1, 1, 1, spec.rot);
+    for (const x of [-0.24, 0.24]) {
+      for (const z of [-0.2, 0.2]) {
+        const mesh = new THREE.Mesh(leg, materials.darkMetal);
+        mesh.position.set(pos.x + Math.cos(spec.rot) * x - Math.sin(spec.rot) * z, 0.2, pos.z + Math.sin(spec.rot) * x + Math.cos(spec.rot) * z);
+        mesh.rotation.z = (rng() - 0.5) * 0.22;
+        mesh.castShadow = true;
+        propGroup.add(mesh);
+      }
+    }
+  }
+
+  const boards = [
+    { c: 2, r: 6, rot: 0 },
+    { c: 12, r: 15, rot: Math.PI },
+    { c: 19, r: 2, rot: Math.PI },
+    { c: 23, r: 12, rot: -Math.PI / 2 }
+  ];
+  for (const spec of boards) {
+    const pos = cellToWorld(spec.c, spec.r);
+    for (let i = 0; i < 3; i += 1) {
+      const mesh = new THREE.Mesh(plank, materials.crate);
+      mesh.position.set(pos.x, 1.12 + i * 0.29, pos.z);
+      mesh.rotation.y = spec.rot + (i - 1) * 0.08;
+      mesh.translateZ(-CELL * 0.49);
+      mesh.castShadow = true;
+      propGroup.add(mesh);
+    }
+  }
+
+  addHangingCable(6, 12, 9, 12);
+  addHangingCable(16, 10, 16, 13);
+  addHangingCable(21, 5, 23, 5);
+}
+
+function addBox(geometry, material, x, y, z, sx, sy, sz, rot = 0) {
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.set(x, y, z);
+  mesh.scale.set(sx, sy, sz);
+  mesh.rotation.y = rot;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  propGroup.add(mesh);
+  return mesh;
+}
+
+function addStain(geometry, x, z, sx, sy, rot) {
+  const mesh = new THREE.Mesh(geometry, materials.stain);
+  mesh.position.set(x, 0.018, z);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.rotation.z = rot;
+  mesh.scale.set(sx, sy, 1);
+  propGroup.add(mesh);
+}
+
+function addHangingCable(c1, r1, c2, r2) {
+  const a = cellToWorld(c1, r1);
+  const b = cellToWorld(c2, r2);
+  const curve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(a.x, WALL_HEIGHT - 0.18, a.z),
+    new THREE.Vector3((a.x + b.x) / 2, WALL_HEIGHT - 0.78, (a.z + b.z) / 2),
+    new THREE.Vector3(b.x, WALL_HEIGHT - 0.28, b.z)
+  ]);
+  const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 12, 0.025, 8), materials.wire);
+  mesh.castShadow = true;
+  propGroup.add(mesh);
+}
+
+function addWallDecals() {
+  const signTexture = makeWarningTexture(256);
+  const signMaterial = new THREE.MeshBasicMaterial({ map: signTexture, transparent: true, opacity: 0.86 });
+  const scratchTexture = makeScratchTexture(256);
+  const scratchMaterial = new THREE.MeshBasicMaterial({ map: scratchTexture, transparent: true, opacity: 0.52, depthWrite: false });
+  const decals = [
+    { c: 1, r: 1, rot: Math.PI / 2, mat: signMaterial, w: 1.18, h: 0.72 },
+    { c: 1, r: 2, rot: Math.PI / 2, mat: scratchMaterial, w: 1.65, h: 1.18 },
+    { c: 5, r: 5, rot: 0, mat: signMaterial, w: 1.2, h: 0.72 },
+    { c: 17, r: 10, rot: Math.PI, mat: signMaterial, w: 1.2, h: 0.72 },
+    { c: 7, r: 14, rot: Math.PI, mat: scratchMaterial, w: 1.7, h: 1.25 },
+    { c: 20, r: 8, rot: -Math.PI / 2, mat: scratchMaterial, w: 1.6, h: 1.1 },
+    { c: 3, r: 13, rot: Math.PI / 2, mat: scratchMaterial, w: 1.55, h: 1.25 }
+  ];
+  for (const decal of decals) {
+    const pos = cellToWorld(decal.c, decal.r);
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(decal.w, decal.h), decal.mat);
+    mesh.position.set(pos.x, 1.55, pos.z);
+    mesh.rotation.y = decal.rot;
+    mesh.translateZ(-CELL * 0.49);
+    propGroup.add(mesh);
+  }
+}
+
+function makeWarningTexture(size) {
+  return makeTexture(size, (ctx, s) => {
+    ctx.fillStyle = '#6e5f28';
+    ctx.fillRect(0, 0, s, s);
+    ctx.strokeStyle = '#1a1308';
+    ctx.lineWidth = 12;
+    ctx.strokeRect(10, 10, s - 20, s - 20);
+    ctx.fillStyle = '#1a1308';
+    ctx.font = 'bold 44px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('KEEP', s / 2, 88);
+    ctx.fillText('QUIET', s / 2, 145);
+    ctx.fillRect(52, 178, s - 104, 14);
+  });
+}
+
+function makeScratchTexture(size) {
+  return makeTexture(size, (ctx, s, random) => {
+    ctx.clearRect(0, 0, s, s);
+    ctx.strokeStyle = 'rgba(5, 6, 5, 0.82)';
+    for (let i = 0; i < 36; i += 1) {
+      ctx.lineWidth = 1 + random() * 3;
+      ctx.beginPath();
+      const x = 20 + random() * (s - 40);
+      const y = 20 + random() * (s - 40);
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + (random() - 0.5) * 96, y + 38 + random() * 70);
+      ctx.stroke();
+    }
+  });
 }
 
 function makePosterTexture(size) {
@@ -680,23 +884,46 @@ function createKeyMesh() {
 }
 
 function createDog() {
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.55, 30, 18), materials.fur);
-  body.scale.set(1.18, 0.55, 0.72);
+  dogGroup.scale.setScalar(0.56);
+
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.56, 34, 22), materials.fur);
+  body.scale.set(1.22, 0.58, 0.76);
   body.position.set(0, 0.43, 0);
   body.castShadow = true;
   dogGroup.add(body);
 
-  const chest = new THREE.Mesh(new THREE.SphereGeometry(0.38, 24, 16), materials.furLight);
-  chest.scale.set(0.8, 0.72, 0.68);
-  chest.position.set(0, 0.45, -0.48);
+  const saddle = new THREE.Mesh(new THREE.SphereGeometry(0.48, 28, 16), materials.furDark);
+  saddle.scale.set(1.12, 0.38, 0.52);
+  saddle.position.set(0, 0.58, 0.08);
+  saddle.castShadow = true;
+  dogGroup.add(saddle);
+
+  const chest = new THREE.Mesh(new THREE.SphereGeometry(0.42, 28, 16), materials.furLight);
+  chest.scale.set(0.9, 0.78, 0.7);
+  chest.position.set(0, 0.46, -0.46);
   chest.castShadow = true;
   dogGroup.add(chest);
 
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.38, 30, 18), materials.fur);
-  head.scale.set(1.02, 0.92, 0.95);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.38, 34, 20), materials.furCoffee);
+  head.scale.set(1.05, 0.92, 0.98);
   head.position.set(0, 0.88, -0.55);
   head.castShadow = true;
   dogGroup.add(head);
+
+  const blaze = new THREE.Mesh(new THREE.SphereGeometry(0.18, 18, 12), materials.furLight);
+  blaze.scale.set(0.42, 1.06, 0.2);
+  blaze.position.set(0, 0.91, -0.88);
+  blaze.castShadow = true;
+  dogGroup.add(blaze);
+
+  const cheekGeometry = new THREE.SphereGeometry(0.16, 18, 12);
+  for (const x of [-0.18, 0.18]) {
+    const cheek = new THREE.Mesh(cheekGeometry, materials.furLight);
+    cheek.scale.set(0.75, 0.58, 0.38);
+    cheek.position.set(x, 0.78, -0.86);
+    cheek.castShadow = true;
+    dogGroup.add(cheek);
+  }
 
   const muzzle = new THREE.Mesh(new THREE.SphereGeometry(0.2, 20, 12), materials.muzzle);
   muzzle.scale.set(0.85, 0.6, 1.1);
@@ -704,19 +931,23 @@ function createDog() {
   muzzle.castShadow = true;
   dogGroup.add(muzzle);
 
-  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.065, 14, 10), materials.eye);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.062, 14, 10), materials.eye);
   nose.position.set(0, 0.83, -1.08);
   dogGroup.add(nose);
 
   const earGeometry = new THREE.ConeGeometry(0.16, 0.38, 18);
-  const leftEar = new THREE.Mesh(earGeometry, materials.fur);
+  const leftEar = new THREE.Mesh(earGeometry, materials.furDark);
   leftEar.position.set(-0.23, 1.15, -0.54);
   leftEar.rotation.set(0.2, 0.4, 0.3);
+  leftEar.userData.baseRotation = leftEar.rotation.clone();
+  leftEar.userData.ear = true;
   leftEar.castShadow = true;
   dogGroup.add(leftEar);
   const rightEar = leftEar.clone();
   rightEar.position.x = 0.23;
   rightEar.rotation.z = -0.3;
+  rightEar.userData.baseRotation = rightEar.rotation.clone();
+  rightEar.userData.ear = true;
   dogGroup.add(rightEar);
 
   const eyeGeometry = new THREE.SphereGeometry(0.045, 12, 8);
@@ -728,35 +959,73 @@ function createDog() {
 
   const legGeometry = new THREE.CapsuleGeometry(0.07, 0.35, 6, 10);
   for (const x of [-0.33, 0.33]) {
-    for (const z of [-0.28, 0.34]) {
-      const leg = new THREE.Mesh(legGeometry, materials.fur);
+    for (const z of [-0.3, 0.32]) {
+      const leg = new THREE.Mesh(legGeometry, z < 0 ? materials.furLight : materials.fur);
       leg.position.set(x, 0.2, z);
       leg.castShadow = true;
       dogGroup.add(leg);
+
+      const paw = new THREE.Mesh(new THREE.SphereGeometry(0.08, 14, 8), materials.furLight);
+      paw.scale.set(1.2, 0.45, 0.95);
+      paw.position.set(x, 0.02, z - 0.02);
+      paw.castShadow = true;
+      dogGroup.add(paw);
     }
   }
 
-  const tail = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.055, 12, 24, Math.PI * 1.45), materials.furLight);
+  const tail = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.06, 12, 28, Math.PI * 1.48), materials.furLight);
   tail.position.set(0, 0.72, 0.55);
-  tail.rotation.set(0.7, 0, Math.PI / 2);
+  tail.rotation.set(0.8, 0.08, Math.PI / 2);
+  tail.userData.baseRotation = tail.rotation.clone();
+  tail.userData.wag = true;
   tail.castShadow = true;
   dogGroup.add(tail);
 
-  const tuftGeometry = new THREE.ConeGeometry(0.045, 0.18, 7);
-  for (let i = 0; i < 58; i += 1) {
-    const tuft = new THREE.Mesh(tuftGeometry, i % 3 === 0 ? materials.furLight : materials.fur);
+  const ruffGeometry = new THREE.ConeGeometry(0.05, 0.22, 7);
+  for (let i = 0; i < 22; i += 1) {
+    const angle = (i / 22) * Math.PI * 2;
+    const ruff = new THREE.Mesh(ruffGeometry, materials.furLight);
+    ruff.position.set(Math.cos(angle) * 0.3, 0.69 + Math.sin(angle * 2) * 0.03, -0.47 + Math.sin(angle) * 0.12);
+    ruff.rotation.set(Math.PI / 2 + rng() * 0.4, angle, rng() * Math.PI);
+    ruff.castShadow = true;
+    dogGroup.add(ruff);
+  }
+
+  const tuftGeometry = new THREE.ConeGeometry(0.043, 0.17, 7);
+  for (let i = 0; i < 94; i += 1) {
+    const mat = i % 5 === 0 ? materials.furLight : i % 4 === 0 ? materials.furDark : i % 3 === 0 ? materials.furCoffee : materials.fur;
+    const tuft = new THREE.Mesh(tuftGeometry, mat);
     const angle = rng() * Math.PI * 2;
-    const radius = 0.34 + rng() * 0.22;
+    const radius = 0.28 + rng() * 0.26;
     const y = 0.38 + rng() * 0.48;
-    tuft.position.set(Math.cos(angle) * radius * 0.9, y, Math.sin(angle) * radius * 0.6);
+    tuft.position.set(Math.cos(angle) * radius * 0.92, y, Math.sin(angle) * radius * 0.68);
     tuft.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI);
+    tuft.userData.baseRotation = tuft.rotation.clone();
+    tuft.userData.furTuft = true;
     tuft.castShadow = true;
     dogGroup.add(tuft);
   }
 
-  const dogEyeLight = new THREE.PointLight(0xffb36b, 0.22, 2.1, 1.9);
+  const dogEyeLight = new THREE.PointLight(0xffb36b, 0.16, 1.5, 1.9);
   dogEyeLight.position.set(0, 0.92, -0.82);
   dogGroup.add(dogEyeLight);
+}
+
+function createDogPhotoCard() {
+  const texture = new THREE.TextureLoader().load(`${import.meta.env.BASE_URL}assets/nighttail-jumpscare.png`);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false
+  });
+  dogPhotoCard = new THREE.Mesh(new THREE.PlaneGeometry(1.28, 2.22), material);
+  dogPhotoCard.visible = false;
+  dogPhotoCard.renderOrder = 6;
+  scene.add(dogPhotoCard);
 }
 
 function createFlashlightVolume() {
@@ -901,6 +1170,7 @@ function startGame() {
 }
 
 function resetGame(showStart) {
+  clearEffectTimers();
   for (const particle of runtime.sprayParticles) {
     sprayGroup.remove(particle);
     particle.geometry.dispose();
@@ -930,8 +1200,15 @@ function resetGame(showStart) {
   dog.jumpscares = 0;
   dog.lastDistance = 99;
   dogGroup.position.copy(dog.pos);
+  dogGroup.rotation.set(0, 0, 0);
+  dogGroup.visible = true;
+  if (dogPhotoCard) {
+    dogPhotoCard.visible = false;
+    dogPhotoCard.material.opacity = 0;
+  }
 
   runtime.time = 0;
+  runtime.threat = 0;
   runtime.messageTimer = 0;
   runtime.message = '';
   runtime.collectedKeys = [];
@@ -965,12 +1242,16 @@ function resetGame(showStart) {
   jumpscare.classList.remove('active');
   bloodFlash.classList.remove('active');
   flashlightButton.classList.add('active');
+  app.style.setProperty('--terror', '0');
+  app.style.setProperty('--danger', '0');
+  app.style.setProperty('--static-opacity', '0');
 
   for (const key of keys) {
     key.visible = true;
     key.userData.collected = false;
   }
 
+  if (exitDoor) exitDoor.rotation.y = Math.PI / 2;
   updateExitState();
   updateHud();
   if (showStart) {
@@ -988,11 +1269,21 @@ function finishGame(win) {
   if (runtime.state === 'won' || runtime.state === 'lost') return;
   runtime.state = win ? 'won' : 'lost';
   runtime.scoreEvents.won = win;
+  runtime.message = '';
+  runtime.messageTimer = 0;
+  messageFeed.textContent = '';
   resultKicker.textContent = win ? 'Escaped' : 'Caught';
   resultTitle.textContent = win ? 'You made it out.' : 'Nighttail found you.';
   resultCopy.textContent = win ? 'The exit clicks open behind you.' : 'The little growl is the last thing in the hall.';
   resultScreen.classList.remove('hidden');
   touchLayer.classList.add('hidden');
+  if (!win && dogPhotoCard) {
+    dogPhotoCard.position.set(dog.pos.x, 1.05, dog.pos.z);
+    dogPhotoCard.lookAt(camera.position.x, dogPhotoCard.position.y, camera.position.z);
+    dogPhotoCard.material.opacity = 0.82;
+    dogPhotoCard.visible = true;
+    dogGroup.visible = false;
+  }
   if (win) audio.win();
 }
 
@@ -1032,6 +1323,7 @@ function update(dt) {
     updateHud(dt);
   }
 
+  updateThreatEffects(dt);
   updateCamera(dt);
   updateFlashlight();
 }
@@ -1268,7 +1560,7 @@ function updateDogThreat(dt) {
     player.fear = Math.min(100, player.fear + dt * (8 - distance) * 0.95);
   }
 
-  if (distance < 1.08 && dog.biteCooldown <= 0 && dog.stun <= 0) {
+  if (distance < 0.72 && dog.biteCooldown <= 0 && dog.stun <= 0 && dog.retreat <= 0) {
     dog.biteCooldown = 3.8;
     dog.jumpscares += 1;
     runtime.scoreEvents.jumpscareSeen = true;
@@ -1348,8 +1640,25 @@ function updateSpray(dt) {
 function triggerJumpScare() {
   jumpscare.classList.add('active');
   bloodFlash.classList.add('active');
-  setTimeout(() => jumpscare.classList.remove('active'), 290);
-  setTimeout(() => bloodFlash.classList.remove('active'), 180);
+  scheduleEffect(() => jumpscare.classList.remove('active'), 1400);
+  scheduleEffect(() => bloodFlash.classList.remove('active'), 620);
+}
+
+function updateThreatEffects(dt) {
+  const distanceThreat = runtime.state === 'playing' ? clamp((8.5 - dog.lastDistance) / 7.4, 0, 1) : 0;
+  const fearThreat = runtime.state === 'playing' ? clamp(player.fear / 100, 0, 1) : 0;
+  const targetThreat = Math.max(distanceThreat, fearThreat * 0.85);
+  runtime.threat = lerp(runtime.threat, targetThreat, clamp(dt * 5.5, 0, 1));
+  const danger = runtime.state === 'playing' ? clamp((3.2 - dog.lastDistance) / 2.8, 0, 1) : 0;
+
+  app.style.setProperty('--terror', runtime.threat.toFixed(3));
+  app.style.setProperty('--danger', danger.toFixed(3));
+  app.style.setProperty('--static-opacity', (runtime.threat * 0.22 + danger * 0.16).toFixed(3));
+
+  if (runtime.state === 'playing' && runtime.threat > 0.28) {
+    player.shake = Math.max(player.shake, runtime.threat * 0.34);
+  }
+  audio.setThreat(runtime.threat, danger);
 }
 
 function toggleFlashlight() {
@@ -1385,10 +1694,40 @@ function animateScene(dt) {
     if (child.geometry?.type === 'CapsuleGeometry') {
       child.rotation.x = Math.sin(runtime.time * 7 + i) * 0.12;
     }
+    if (child.userData?.wag && child.userData.baseRotation) {
+      child.rotation.copy(child.userData.baseRotation);
+      child.rotation.y += Math.sin(runtime.time * 13) * 0.34;
+      child.rotation.z += Math.sin(runtime.time * 11) * 0.16;
+    }
+    if (child.userData?.ear && child.userData.baseRotation) {
+      child.rotation.copy(child.userData.baseRotation);
+      child.rotation.x += Math.sin(runtime.time * 5.4 + i) * 0.035;
+    }
+    if (child.userData?.furTuft && child.userData.baseRotation) {
+      child.rotation.copy(child.userData.baseRotation);
+      child.rotation.x += Math.sin(runtime.time * 8.5 + i * 0.37) * 0.035;
+    }
   }
   if (bloomPass) {
     bloomPass.strength = isMobileLike ? 0.13 + player.fear * 0.001 : 0.19 + player.fear * 0.0012;
   }
+  updateDogPhotoCard();
+}
+
+function updateDogPhotoCard() {
+  if (!dogPhotoCard) return;
+  const show = runtime.state === 'lost' || (runtime.state === 'playing' && dog.lastDistance < 3.45);
+  dogPhotoCard.visible = show;
+  dogGroup.visible = !show;
+  if (!show) {
+    dogPhotoCard.material.opacity = 0;
+    return;
+  }
+
+  const fade = clamp((3.45 - dog.lastDistance) / 2.15, 0.18, 0.92);
+  dogPhotoCard.position.set(dog.pos.x, 1.05 + Math.sin(runtime.time * 8.5) * 0.02, dog.pos.z);
+  dogPhotoCard.lookAt(camera.position.x, dogPhotoCard.position.y, camera.position.z);
+  dogPhotoCard.material.opacity = fade;
 }
 
 function updateFps(dt) {
@@ -1555,6 +1894,8 @@ function mulberry32(seed) {
 const audio = {
   ctx: null,
   master: null,
+  ambient: null,
+  heartbeatTimer: 0,
   unlocked: false,
   unlock() {
     if (this.unlocked) return;
@@ -1565,6 +1906,81 @@ const audio = {
     this.master.gain.value = 0.58;
     this.master.connect(this.ctx.destination);
     this.unlocked = true;
+    this.startAmbience();
+  },
+  startAmbience() {
+    if (!this.ctx || this.ambient) return;
+    const now = this.ctx.currentTime;
+    const drone = this.ctx.createOscillator();
+    const undertone = this.ctx.createOscillator();
+    const tension = this.ctx.createOscillator();
+    const droneGain = this.ctx.createGain();
+    const undertoneGain = this.ctx.createGain();
+    const tensionGain = this.ctx.createGain();
+    const noiseGain = this.ctx.createGain();
+    const noiseFilter = this.ctx.createBiquadFilter();
+
+    drone.type = 'sawtooth';
+    undertone.type = 'sine';
+    tension.type = 'triangle';
+    drone.frequency.setValueAtTime(42, now);
+    undertone.frequency.setValueAtTime(29, now);
+    tension.frequency.setValueAtTime(229, now);
+    droneGain.gain.value = 0.018;
+    undertoneGain.gain.value = 0.026;
+    tensionGain.gain.value = 0.0001;
+
+    const samples = Math.floor(this.ctx.sampleRate * 2);
+    const buffer = this.ctx.createBuffer(1, samples, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < samples; i += 1) data[i] = (Math.random() * 2 - 1) * 0.34;
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    noise.loop = true;
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.value = 520;
+    noiseFilter.Q.value = 0.55;
+    noiseGain.gain.value = 0.012;
+
+    drone.connect(droneGain);
+    undertone.connect(undertoneGain);
+    tension.connect(tensionGain);
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    droneGain.connect(this.master);
+    undertoneGain.connect(this.master);
+    tensionGain.connect(this.master);
+    noiseGain.connect(this.master);
+    drone.start(now);
+    undertone.start(now);
+    tension.start(now);
+    noise.start(now);
+
+    this.ambient = { drone, undertone, tension, droneGain, undertoneGain, tensionGain, noiseGain, noiseFilter };
+  },
+  setThreat(threat = 0, danger = 0) {
+    if (!this.ctx || !this.ambient) return;
+    const now = this.ctx.currentTime;
+    const t = clamp(threat, 0, 1);
+    const d = clamp(danger, 0, 1);
+    this.ambient.drone.frequency.setTargetAtTime(38 + t * 18, now, 0.18);
+    this.ambient.undertone.frequency.setTargetAtTime(27 + d * 8, now, 0.16);
+    this.ambient.tension.frequency.setTargetAtTime(212 + t * 76 + Math.sin(runtime.time * 9) * t * 7, now, 0.08);
+    this.ambient.droneGain.gain.setTargetAtTime(0.018 + t * 0.032, now, 0.12);
+    this.ambient.undertoneGain.gain.setTargetAtTime(0.026 + d * 0.035, now, 0.12);
+    this.ambient.tensionGain.gain.setTargetAtTime(0.0001 + Math.max(0, t - 0.2) * 0.038, now, 0.1);
+    this.ambient.noiseGain.gain.setTargetAtTime(0.012 + t * 0.03 + d * 0.028, now, 0.08);
+    this.ambient.noiseFilter.frequency.setTargetAtTime(420 + t * 1500, now, 0.12);
+
+    this.heartbeatTimer -= 1 / 60;
+    if (d > 0.18 && this.heartbeatTimer <= 0) {
+      this.heartbeatTimer = Math.max(0.24, 0.86 - d * 0.48);
+      this.heartbeat(0.25 + d * 0.22);
+    }
+  },
+  heartbeat(gain = 0.24) {
+    this.tone('sine', 74, 0.11, gain, -18);
+    scheduleEffect(() => this.tone('sine', 59, 0.13, gain * 0.65, -12), 145);
   },
   tone(type, frequency, duration, gain = 0.14, bend = 0) {
     if (!this.ctx) return;
@@ -1609,7 +2025,7 @@ const audio = {
   },
   bark(amount = 1) {
     this.tone('square', 340 + amount * 90, 0.095, 0.09 + amount * 0.08, -150);
-    setTimeout(() => this.tone('square', 270, 0.08, 0.06, -90), 78);
+    scheduleEffect(() => this.tone('square', 270, 0.08, 0.06, -90), 78);
   },
   jumpscare() {
     this.noise(0.42, 0.34, 650);
@@ -1624,7 +2040,7 @@ const audio = {
   },
   pickup() {
     this.tone('triangle', 700, 0.12, 0.08, 260);
-    setTimeout(() => this.tone('triangle', 960, 0.12, 0.06, 90), 90);
+    scheduleEffect(() => this.tone('triangle', 960, 0.12, 0.06, 90), 90);
   },
   locked() {
     this.tone('square', 120, 0.14, 0.08, -30);
@@ -1634,11 +2050,14 @@ const audio = {
   },
   win() {
     this.tone('triangle', 440, 0.18, 0.08, 220);
-    setTimeout(() => this.tone('triangle', 660, 0.22, 0.08, 160), 160);
-    setTimeout(() => this.tone('triangle', 980, 0.28, 0.07, 100), 340);
+    scheduleEffect(() => this.tone('triangle', 660, 0.22, 0.08, 160), 160);
+    scheduleEffect(() => this.tone('triangle', 980, 0.28, 0.07, 100), 340);
   }
 };
 
+animate();
+
+if (TEST_MODE) {
 window.__NIGHTTAIL_TEST__ = {
   start() {
     startGame();
@@ -1659,7 +2078,8 @@ window.__NIGHTTAIL_TEST__ = {
   },
   stageDogBiteTest() {
     const flatPlayer = new THREE.Vector3(player.pos.x, 0, player.pos.z);
-    dog.pos.copy(flatPlayer).addScaledVector(getFlatForward(), 0.82);
+    input.flashlightOn = false;
+    dog.pos.copy(flatPlayer).addScaledVector(getFlatForward(), 0.48);
     dog.vel.set(0, 0, 0);
     dog.path = [];
     dog.pathTimer = 0;
@@ -1669,6 +2089,36 @@ window.__NIGHTTAIL_TEST__ = {
     dog.lastDistance = flatDistance(player.pos, dog.pos);
     dogGroup.position.copy(dog.pos);
     player.fear = Math.min(player.fear, 20);
+  },
+  stageDogEncounterTest(distance = 2.15) {
+    const flatPlayer = new THREE.Vector3(player.pos.x, 0, player.pos.z);
+    dog.pos.copy(flatPlayer).addScaledVector(getFlatForward(), clamp(distance, 1.2, 4.2));
+    dog.vel.set(0, 0, 0);
+    dog.path = [];
+    dog.pathTimer = 0;
+    dog.stun = 0;
+    dog.retreat = 0;
+    dog.biteCooldown = 1.2;
+    dog.flashlightExposure = 0;
+    dog.lastDistance = flatDistance(player.pos, dog.pos);
+    dogGroup.position.copy(dog.pos);
+    dogGroup.lookAt(player.pos.x, dogGroup.position.y, player.pos.z);
+    player.fear = Math.max(player.fear, 34);
+    runtime.threat = Math.max(runtime.threat, 0.62);
+    app.style.setProperty('--terror', runtime.threat.toFixed(3));
+    app.style.setProperty('--danger', '0.28');
+    app.style.setProperty('--static-opacity', '0.22');
+    if (dogPhotoCard) {
+      dogPhotoCard.position.set(dog.pos.x, 1.05, dog.pos.z);
+      dogPhotoCard.lookAt(camera.position.x, dogPhotoCard.position.y, camera.position.z);
+      dogPhotoCard.material.opacity = 0.72;
+      dogPhotoCard.visible = true;
+      dogGroup.visible = false;
+    }
+  },
+  forceLoseTest() {
+    player.fear = 100;
+    finishGame(false);
   },
   setFlashlight(on) {
     input.flashlightOn = Boolean(on);
@@ -1692,7 +2142,19 @@ window.__NIGHTTAIL_TEST__ = {
         retreat: dog.retreat,
         squirtHits: dog.squirtHits,
         flashlightRepels: dog.flashlightRepels,
-        jumpscares: dog.jumpscares
+        jumpscares: dog.jumpscares,
+        radius: DOG_RADIUS,
+        visualScale: dogGroup.scale.x,
+        photoCardVisible: Boolean(dogPhotoCard?.visible)
+      },
+      effects: {
+        threat: runtime.threat,
+        staticOpacity: Number(getComputedStyle(app).getPropertyValue('--static-opacity')) || 0,
+        danger: Number(getComputedStyle(app).getPropertyValue('--danger')) || 0
+      },
+      audio: {
+        unlocked: audio.unlocked,
+        ambientActive: Boolean(audio.ambient)
       },
       keys: keys.map((key) => ({
         index: key.userData.index,
@@ -1730,3 +2192,4 @@ window.__NIGHTTAIL_TEST__ = {
     }));
   }
 };
+}

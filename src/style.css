@@ -5,6 +5,9 @@
 html,
 body,
 #app {
+  --terror: 0;
+  --static-opacity: 0;
+  --danger: 0;
   width: 100%;
   height: 100%;
   margin: 0;
@@ -26,9 +29,12 @@ button {
   width: 100%;
   height: 100%;
   outline: none;
+  filter: contrast(calc(1 + var(--terror) * 0.22)) saturate(calc(0.9 + var(--terror) * 0.35)) brightness(calc(1 - var(--danger) * 0.12));
 }
 
 #vignette,
+#terror-overlay,
+#static-noise,
 #blood-flash,
 #jumpscare {
   pointer-events: none;
@@ -38,13 +44,41 @@ button {
 
 #vignette {
   background:
-    radial-gradient(circle at center, transparent 0 37%, rgba(0, 0, 0, 0.32) 67%, rgba(0, 0, 0, 0.78) 100%),
+    radial-gradient(circle at center, transparent 0 34%, rgba(0, 0, 0, calc(0.3 + var(--terror) * 0.18)) 65%, rgba(0, 0, 0, calc(0.76 + var(--terror) * 0.12)) 100%),
     linear-gradient(180deg, rgba(9, 12, 12, 0.18), rgba(0, 0, 0, 0.35));
   mix-blend-mode: multiply;
 }
 
+#terror-overlay {
+  opacity: calc(var(--terror) * 0.86);
+  background:
+    radial-gradient(circle at 50% 50%, transparent 0 42%, rgba(113, 0, 0, 0.32) 68%, rgba(0, 0, 0, 0.74) 100%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 5px),
+    linear-gradient(90deg, rgba(29, 0, 0, 0.12), transparent 35%, rgba(67, 0, 0, 0.16));
+  mix-blend-mode: screen;
+}
+
+#static-noise {
+  opacity: var(--static-opacity);
+  background:
+    repeating-radial-gradient(circle at 17% 31%, rgba(255,255,255,0.12) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(97deg, rgba(255,255,255,0.06) 0 1px, transparent 1px 7px),
+    repeating-linear-gradient(11deg, transparent 0 3px, rgba(255,255,255,0.05) 3px 4px);
+  background-size: 83px 79px, 67px 67px, 41px 53px;
+  mix-blend-mode: overlay;
+  animation: static-crawl 220ms steps(2) infinite;
+}
+
+@keyframes static-crawl {
+  0% { transform: translate3d(-1%, 1%, 0); }
+  50% { transform: translate3d(1%, -1%, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+
 #blood-flash {
-  background: radial-gradient(circle, rgba(95, 6, 5, 0.36), rgba(26, 0, 0, 0.78));
+  background:
+    radial-gradient(circle, rgba(143, 10, 7, 0.26), rgba(26, 0, 0, 0.78)),
+    repeating-linear-gradient(90deg, transparent 0 16px, rgba(255,255,255,0.04) 16px 17px);
   opacity: 0;
   transition: opacity 160ms ease;
 }
@@ -69,16 +103,33 @@ button {
 
 #jumpscare-face {
   position: relative;
-  width: min(72vw, 420px);
-  aspect-ratio: 1;
-  border-radius: 43% 43% 48% 48%;
+  width: min(88vw, 470px);
+  height: min(77vh, 720px);
+  border-radius: 20px;
+  background: #050202;
+  box-shadow: 0 0 110px rgba(0, 0, 0, 0.98), 0 0 42px rgba(121, 17, 7, 0.42), inset 0 0 85px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+#jumpscare-face::before {
+  content: "";
+  position: absolute;
+  inset: 0;
   background:
-    radial-gradient(circle at 38% 45%, #0d0705 0 4%, transparent 5%),
-    radial-gradient(circle at 62% 45%, #0d0705 0 4%, transparent 5%),
-    radial-gradient(circle at 50% 66%, #1a0b06 0 9%, transparent 10%),
-    radial-gradient(circle at 50% 30%, rgba(255, 238, 188, 0.18), transparent 33%),
-    linear-gradient(140deg, #3c1e11, #8c562c 48%, #2b160d 100%);
-  box-shadow: 0 0 80px rgba(0, 0, 0, 0.9), inset 0 0 85px rgba(0, 0, 0, 0.45);
+    radial-gradient(circle at 50% 42%, transparent 0 38%, rgba(75, 0, 0, 0.34) 68%, rgba(0, 0, 0, 0.52) 100%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 6px);
+  mix-blend-mode: screen;
+  pointer-events: none;
+  z-index: 1;
+}
+
+#jumpscare-photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: contrast(1.18) saturate(0.95) brightness(0.92);
+  transform: scale(1.04);
 }
 
 #jumpscare-face .ear {
@@ -87,7 +138,7 @@ button {
   width: 27%;
   height: 30%;
   border-radius: 80% 20% 70% 25%;
-  background: linear-gradient(135deg, #2a1309, #8f5a2d);
+  background: linear-gradient(135deg, #1e0f08, #6f4125 62%, #e8d7bf);
 }
 
 #jumpscare-face .ear.left {
@@ -106,8 +157,8 @@ button {
   width: 12%;
   height: 12%;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 32%, #ffe7a4 0 10%, #0b0604 12% 100%);
-  box-shadow: 0 0 24px rgba(255, 196, 93, 0.72);
+  background: radial-gradient(circle at 35% 32%, #fff0ab 0 9%, #270906 12% 30%, #050201 31% 100%);
+  box-shadow: 0 0 24px rgba(255, 196, 93, 0.84), 0 0 10px rgba(149, 14, 8, 0.7) inset;
 }
 
 #jumpscare-face .eye.left {
@@ -125,18 +176,21 @@ button {
   width: 30%;
   height: 23%;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 44%, #090403 0 11%, transparent 12%), #c8925b;
+  background: radial-gradient(circle at 50% 44%, #090403 0 11%, transparent 12%), #d9bea1;
   box-shadow: inset 0 -16px 22px rgba(69, 33, 14, 0.58);
 }
 
 #jumpscare-face .mouth {
   position: absolute;
-  left: 43%;
-  top: 72%;
-  width: 14%;
-  height: 10%;
-  border-radius: 0 0 50% 50%;
-  background: #130604;
+  left: 40%;
+  top: 70%;
+  width: 20%;
+  height: 14%;
+  border-radius: 10% 10% 48% 48%;
+  background:
+    linear-gradient(90deg, transparent 0 16%, #f2e7cf 16% 25%, transparent 25% 36%, #f2e7cf 36% 47%, transparent 47% 55%, #f2e7cf 55% 65%, transparent 65% 76%, #f2e7cf 76% 84%, transparent 84% 100%),
+    radial-gradient(ellipse at 50% 72%, #220806 0 50%, #050201 53% 100%);
+  box-shadow: inset 0 8px 18px rgba(0, 0, 0, 0.9);
 }
 
 .screen {

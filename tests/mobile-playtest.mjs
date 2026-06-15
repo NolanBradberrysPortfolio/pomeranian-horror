@@ -19,6 +19,7 @@ const report = {
   emulator: 'Pixel 7 touch viewport',
   checks: [],
   progress: [],
+  evidence: {},
   ratings: {},
   finalSnapshot: null
 };
@@ -26,6 +27,8 @@ const report = {
 await mkdir(resultsDir, { recursive: true });
 
 let browser;
+let context;
+let successExitTimer;
 const viteServer = await createServer({
   root,
   configFile: path.join(root, 'vite.config.js'),
@@ -40,7 +43,7 @@ try {
   await viteServer.listen();
   const localUrl = viteServer.resolvedUrls?.local?.[0];
   if (!localUrl) throw new Error('Vite did not report a local URL');
-  const url = new URL('/pomeranian-horror/', localUrl).toString();
+  const url = new URL('/pomeranian-horror/?test=1', localUrl).toString();
 
   browser = await launchBrowser();
   const pixel = devices['Pixel 7'] ?? {
@@ -50,7 +53,7 @@ try {
     isMobile: true,
     hasTouch: true
   };
-  const context = await browser.newContext({
+  context = await browser.newContext({
     ...pixel,
     viewport: { width: 412, height: 915 },
     isMobile: true,
@@ -80,14 +83,41 @@ try {
   assertCheck('webgl canvas rendered', canvasQuality.bytes > 30000, { screenshot: 'playtest-results/mobile-canvas.png', ...canvasQuality });
   assertCheck('canvas has visible detail', canvasQuality.visibleRatio > 0.08 && canvasQuality.contrast > 100 && canvasQuality.detailScore >= 0.35, canvasQuality);
   assertCheck('initial fps usable', snap.fps >= MIN_TEN_FPS, { fps: snap.fps, required: MIN_TEN_FPS });
+  assertCheck('ambient horror music started', snap.audio.unlocked && snap.audio.ambientActive, snap.audio);
+  assertCheck('dog is small Pomeranian scale', snap.dog.radius <= 0.24 && snap.dog.visualScale <= 0.6, snap.dog);
 
-  await exerciseRealMobileControls(page);
+  await stageDogEncounter(page);
+  snap = await snapshot(page);
+  const encounterQuality = await pageScreenshotQuality(page, 'mobile-dog-encounter.png');
+  report.evidence.encounterQuality = encounterQuality;
+  assertCheck('dog encounter captured', snap.dog.distance < 4.3 && snap.dog.photoCardVisible && snap.effects.threat > 0.2, { dog: snap.dog, effects: snap.effects, screenshot: 'playtest-results/mobile-dog-encounter.png', ...encounterQuality });
+
+  await page.evaluate(() => window.__NIGHTTAIL_TEST__.forceLoseTest());
+  await page.waitForFunction(() => window.__NIGHTTAIL_TEST__.snapshot().state === 'lost', null, { timeout: 3000 });
+  const loseQuality = await pageScreenshotQuality(page, 'mobile-lose.png');
+  report.evidence.loseQuality = loseQuality;
+  assertCheck('lose screen captured', loseQuality.bytes > 30000, { screenshot: 'playtest-results/mobile-lose.png', ...loseQuality });
+
+  await page.evaluate(() => window.__NIGHTTAIL_TEST__.reset());
+  await page.waitForFunction(() => window.__NIGHTTAIL_TEST__.snapshot().state === 'playing', null, { timeout: 3000 });
+  await page.waitForTimeout(220);
+
+  const controlMetrics = await exerciseRealMobileControls(page);
+  report.evidence.controlMetrics = controlMetrics;
   snap = await snapshot(page);
   assertCheck('real touch controls exercised', snap.events.mobileInputSeen === true, snap.events);
 
   await triggerDogDrivenJumpScare(page);
+  const jumpscareQuality = await pageScreenshotQuality(page, 'mobile-jumpscare.png');
+  report.evidence.jumpscareQuality = jumpscareQuality;
+  await page.waitForTimeout(760);
+  await page.evaluate(() => window.__NIGHTTAIL_TEST__.setFlashlight(true));
   snap = await snapshot(page);
+  const scareEffects = snap.effects;
+  report.evidence.scareEffects = scareEffects;
   assertCheck('dog-driven jump scare triggered', snap.events.jumpscareSeen === true && snap.dog.jumpscares >= 1, snap.dog);
+  assertCheck('proximity screen effects active', snap.effects.threat > 0.2 && snap.effects.staticOpacity > 0.02, snap.effects);
+  assertCheck('jump scare screenshot captured', jumpscareQuality.bytes > 30000, { screenshot: 'playtest-results/mobile-jumpscare.png', ...jumpscareQuality });
 
   const keyTargets = snap.keys
     .slice()
@@ -119,26 +149,51 @@ try {
   assertCheck('mobile/touch path exercised', snap.events.mobileInputSeen === true, snap.events);
   assertCheck('no browser console errors', browserErrors.length === 0, { browserErrors });
 
-  await page.screenshot({ path: path.join(resultsDir, 'mobile-win.png'), fullPage: true });
+  const winQuality = await pageScreenshotQuality(page, 'mobile-win.png');
+  report.evidence.winQuality = winQuality;
 
-  report.ratings = {
-    graphics: 10,
-    mobileControls: 10,
-    playability: 10,
-    enemyMechanics: 10,
-    objectiveFlow: 10,
-    performance: snap.fps >= MIN_TEN_FPS ? 10 : 9,
-    testConfidence: 10
-  };
+  report.ratings = scoreRatings({
+    snap,
+    canvasQuality,
+    encounterQuality,
+    jumpscareQuality,
+    loseQuality,
+    winQuality,
+    controlMetrics,
+    scareEffects,
+    browserErrors
+  });
   assertCheck('10/10 acceptance rubric', Object.values(report.ratings).every((score) => score === 10), report.ratings);
 
   await writeFile(path.join(resultsDir, 'mobile-playtest-report.json'), JSON.stringify(report, null, 2));
+  scheduleSuccessfulExit();
+  await context.close();
+  context = null;
   await browser.close();
   browser = null;
-  console.log(JSON.stringify(report, null, 2));
+  console.log(JSON.stringify({
+    status: 'passed',
+    report: 'playtest-results/mobile-playtest-report.json',
+    ratings: report.ratings,
+    finalState: report.finalSnapshot?.state,
+    checks: {
+      passed: report.checks.filter((check) => check.passed).length,
+      failed: report.checks.filter((check) => !check.passed).length
+    }
+  }, null, 2));
 } finally {
-  if (browser) await browser.close().catch(() => {});
-  await viteServer.close();
+  if (context) await closeWithin(() => context.close(), 3000);
+  if (browser) await closeWithin(() => browser.close(), 3000);
+  await closeVite(viteServer);
+}
+
+// Vite/Playwright can leave ref'ed Windows handles alive after a successful
+// one-shot run. By this point all evidence and the report have been written.
+process.exit(0);
+
+function scheduleSuccessfulExit() {
+  if (successExitTimer) return;
+  successExitTimer = setTimeout(() => process.exit(0), 6000);
 }
 
 async function launchBrowser() {
@@ -155,6 +210,17 @@ async function snapshot(page) {
 
 async function screenshotQuality(page, filename) {
   const buffer = await page.locator('#game-canvas').screenshot({ path: path.join(resultsDir, filename) });
+  const metrics = pngMetrics(buffer);
+  return {
+    bytes: buffer.length,
+    visibleRatio: Number(metrics.visibleRatio.toFixed(4)),
+    contrast: Number(metrics.contrast.toFixed(2)),
+    detailScore: Number(metrics.detailScore.toFixed(2))
+  };
+}
+
+async function pageScreenshotQuality(page, filename) {
+  const buffer = await page.screenshot({ path: path.join(resultsDir, filename), fullPage: true });
   const metrics = pngMetrics(buffer);
   return {
     bytes: buffer.length,
@@ -279,6 +345,27 @@ function findFreePort() {
   });
 }
 
+async function closeVite(server) {
+  server.httpServer?.closeIdleConnections?.();
+  server.httpServer?.closeAllConnections?.();
+  server.httpServer?.unref?.();
+  await closeWithin(() => server.close(), 3000);
+}
+
+async function closeWithin(closeFn, ms) {
+  let timer;
+  try {
+    await Promise.race([
+      Promise.resolve().then(closeFn).catch(() => {}),
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, ms);
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function exerciseRealMobileControls(page) {
   const before = await snapshot(page);
   const joystick = await page.locator('#joystick').boundingBox();
@@ -308,15 +395,24 @@ async function exerciseRealMobileControls(page) {
   const looked = Math.abs(normalizeAngle(after.player.yaw - before.player.yaw));
   assertCheck('real joystick moved player', moved > 0.08, { moved, before: before.player, after: after.player });
   assertCheck('real look drag turned camera', looked > 0.08, { looked, beforeYaw: before.player.yaw, afterYaw: after.player.yaw });
+  return {
+    moved: Number(moved.toFixed(3)),
+    looked: Number(looked.toFixed(3))
+  };
+}
+
+async function stageDogEncounter(page) {
+  await page.evaluate(() => window.__NIGHTTAIL_TEST__.stageDogEncounterTest(2.15));
+  await page.waitForTimeout(380);
 }
 
 async function triggerDogDrivenJumpScare(page) {
   await page.evaluate(() => window.__NIGHTTAIL_TEST__.stageDogBiteTest());
+  await page.waitForFunction(() => document.querySelector('#jumpscare')?.classList.contains('active'), null, { timeout: 5000 });
   await page.waitForFunction(() => {
     const snap = window.__NIGHTTAIL_TEST__.snapshot();
     return snap.events.jumpscareSeen && snap.dog.jumpscares >= 1;
   }, null, { timeout: 5000 });
-  await page.waitForTimeout(360);
 }
 
 async function dispatchPointer(page, selector, type, data) {
@@ -402,6 +498,23 @@ async function faceAndSprayDog(page, snap) {
     await page.waitForTimeout(35);
   }
   await page.evaluate(() => window.__NIGHTTAIL_TEST__.fire());
+}
+
+function scoreRatings({ snap, canvasQuality, encounterQuality, jumpscareQuality, loseQuality, winQuality, controlMetrics, scareEffects, browserErrors }) {
+  return {
+    graphics: gate(canvasQuality.detailScore >= 0.35 && encounterQuality.bytes > 30000 && encounterQuality.contrast > 90),
+    mobileControls: gate(controlMetrics.moved > 0.08 && controlMetrics.looked > 0.08 && snap.events.mobileInputSeen),
+    playability: gate(snap.state === 'won' && snap.events.keyPickups === 3 && snap.events.exitUnlocked),
+    enemyMechanics: gate(snap.events.jumpscareSeen && (snap.dog.squirtHits + snap.dog.flashlightRepels > 0 || snap.events.dogRepelled)),
+    scareProof: gate(jumpscareQuality.bytes > 30000 && loseQuality.bytes > 30000 && scareEffects.staticOpacity > 0.02),
+    objectiveFlow: gate(snap.player.keys === 3 && snap.exit.unlocked && winQuality.bytes > 30000),
+    performance: gate(snap.fps >= MIN_TEN_FPS),
+    testConfidence: gate(browserErrors.length === 0 && canvasQuality.visibleRatio > 0.08)
+  };
+}
+
+function gate(condition) {
+  return condition ? 10 : 9;
 }
 
 function findPathFromSnapshot(snap, start, goal) {
