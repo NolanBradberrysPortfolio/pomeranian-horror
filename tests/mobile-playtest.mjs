@@ -78,7 +78,7 @@ try {
   await page.screenshot({ path: path.join(resultsDir, 'mobile-start.png'), fullPage: true });
 
   let snap = await snapshot(page);
-  assertCheck('mobile controls visible', snap.mobileUi.joystick && snap.mobileUi.sprayButton && snap.mobileUi.flashlightButton, snap.mobileUi);
+  assertCheck('mobile controls visible', snap.mobileUi.joystick && snap.mobileUi.sprayButton && snap.mobileUi.flashlightButton && snap.mobileUi.weaponView, snap.mobileUi);
   const canvasQuality = await screenshotQuality(page, 'mobile-canvas.png');
   assertCheck('webgl canvas rendered', canvasQuality.bytes > 30000, { screenshot: 'playtest-results/mobile-canvas.png', ...canvasQuality });
   assertCheck('canvas has visible detail', canvasQuality.visibleRatio > 0.08 && canvasQuality.contrast > 100 && canvasQuality.detailScore >= 0.35, canvasQuality);
@@ -86,11 +86,11 @@ try {
   assertCheck('ambient horror music started', snap.audio.unlocked && snap.audio.ambientActive, snap.audio);
   assertCheck('dog is small Pomeranian scale', snap.dog.radius <= 0.24 && snap.dog.visualScale <= 0.6, snap.dog);
 
-  await stageDogEncounter(page);
+  await stageOrganicDogEncounter(page);
   snap = await snapshot(page);
   const encounterQuality = await pageScreenshotQuality(page, 'mobile-dog-encounter.png');
   report.evidence.encounterQuality = encounterQuality;
-  assertCheck('dog encounter captured', snap.dog.distance < 4.3 && snap.dog.photoCardVisible && snap.effects.threat > 0.2, { dog: snap.dog, effects: snap.effects, screenshot: 'playtest-results/mobile-dog-encounter.png', ...encounterQuality });
+  assertCheck('Daisy apparition captured', snap.dog.distance < 4.3 && snap.dog.apparitionVisible && snap.dog.apparitionTimer > 0 && snap.audio.ambientMuted && snap.effects.threat > 0.2, { dog: snap.dog, audio: snap.audio, effects: snap.effects, screenshot: 'playtest-results/mobile-dog-encounter.png', ...encounterQuality });
 
   await page.evaluate(() => window.__NIGHTTAIL_TEST__.forceLoseTest());
   await page.waitForFunction(() => window.__NIGHTTAIL_TEST__.snapshot().state === 'lost', null, { timeout: 3000 });
@@ -107,9 +107,10 @@ try {
   snap = await snapshot(page);
   assertCheck('real touch controls exercised', snap.events.mobileInputSeen === true, snap.events);
 
-  await triggerDogDrivenJumpScare(page);
+  await triggerOrganicDogJumpScare(page);
   const jumpscareQuality = await pageScreenshotQuality(page, 'mobile-jumpscare.png');
   report.evidence.jumpscareQuality = jumpscareQuality;
+  await waitForJumpScareEvent(page);
   await page.waitForTimeout(760);
   await page.evaluate(() => window.__NIGHTTAIL_TEST__.setFlashlight(true));
   snap = await snapshot(page);
@@ -143,7 +144,8 @@ try {
   report.finalSnapshot = snap;
   assertCheck('escaped level', snap.state === 'won', { state: snap.state, player: snap.player });
   assertCheck('final fps usable', snap.fps >= MIN_TEN_FPS, { fps: snap.fps, required: MIN_TEN_FPS });
-  assertCheck('enemy mechanics exercised', snap.dog.squirtHits + snap.dog.flashlightRepels > 0 || snap.events.dogRepelled, snap.dog);
+  assertCheck('enemy mechanics exercised', snap.dog.squirtHits > 0 && snap.dog.vanishes > 0 && (snap.events.dogRepelled || snap.events.dogVanished), snap.dog);
+  assertCheck('Slender-style apparition events fired', snap.events.apparitionSeen && snap.events.dogVanished, snap.events);
   assertCheck('jump scare feature exercised', snap.events.jumpscareSeen === true, snap.events);
   assertCheck('key objective events fired', snap.events.keyPickups === 3 && snap.events.exitUnlocked && snap.events.won, snap.events);
   assertCheck('mobile/touch path exercised', snap.events.mobileInputSeen === true, snap.events);
@@ -401,14 +403,25 @@ async function exerciseRealMobileControls(page) {
   };
 }
 
-async function stageDogEncounter(page) {
-  await page.evaluate(() => window.__NIGHTTAIL_TEST__.stageDogEncounterTest(2.15));
-  await page.waitForTimeout(380);
+async function stageOrganicDogEncounter(page) {
+  await page.evaluate(() => window.__NIGHTTAIL_TEST__.placeDogForOrganicApparitionTest(2.15));
+  await page.waitForFunction(() => {
+    const snap = window.__NIGHTTAIL_TEST__.snapshot();
+    return snap.dog.apparitionVisible && snap.dog.apparitionTimer > 0 && snap.audio.ambientMuted && snap.events.apparitionSeen;
+  }, null, { timeout: 3000 });
 }
 
-async function triggerDogDrivenJumpScare(page) {
-  await page.evaluate(() => window.__NIGHTTAIL_TEST__.stageDogBiteTest());
-  await page.waitForFunction(() => document.querySelector('#jumpscare')?.classList.contains('active'), null, { timeout: 5000 });
+async function triggerOrganicDogJumpScare(page) {
+  await page.evaluate(() => window.__NIGHTTAIL_TEST__.placeDogForOrganicBiteTest());
+  await page.waitForFunction(() => {
+    const snap = window.__NIGHTTAIL_TEST__.snapshot();
+    return snap.events.jumpscareSeen
+      && snap.dog.jumpscares >= 1
+      && document.querySelector('#jumpscare')?.classList.contains('active');
+  }, null, { timeout: 5000 });
+}
+
+async function waitForJumpScareEvent(page) {
   await page.waitForFunction(() => {
     const snap = window.__NIGHTTAIL_TEST__.snapshot();
     return snap.events.jumpscareSeen && snap.dog.jumpscares >= 1;
@@ -459,7 +472,7 @@ async function driveTo(page, target, label) {
     }
     lastDist = dist;
 
-    if (snap.dog.distance < 6.2 && snap.dog.stun <= 0.15) {
+    if (snap.dog.distance < 8.4 && snap.dog.hiddenTimer <= 0.05) {
       await faceAndSprayDog(page, snap);
       await page.waitForTimeout(55);
       continue;
@@ -505,7 +518,8 @@ function scoreRatings({ snap, canvasQuality, encounterQuality, jumpscareQuality,
     graphics: gate(canvasQuality.detailScore >= 0.35 && encounterQuality.bytes > 30000 && encounterQuality.contrast > 90),
     mobileControls: gate(controlMetrics.moved > 0.08 && controlMetrics.looked > 0.08 && snap.events.mobileInputSeen),
     playability: gate(snap.state === 'won' && snap.events.keyPickups === 3 && snap.events.exitUnlocked),
-    enemyMechanics: gate(snap.events.jumpscareSeen && (snap.dog.squirtHits + snap.dog.flashlightRepels > 0 || snap.events.dogRepelled)),
+    enemyMechanics: gate(snap.events.jumpscareSeen && snap.dog.squirtHits > 0 && snap.dog.vanishes > 0),
+    slenderMechanics: gate(snap.events.apparitionSeen && snap.events.dogVanished && scareEffects.staticOpacity > 0.02),
     scareProof: gate(jumpscareQuality.bytes > 30000 && loseQuality.bytes > 30000 && scareEffects.staticOpacity > 0.02),
     objectiveFlow: gate(snap.player.keys === 3 && snap.exit.unlocked && winQuality.bytes > 30000),
     performance: gate(snap.fps >= MIN_TEN_FPS),
