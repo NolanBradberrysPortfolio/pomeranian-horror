@@ -23,6 +23,7 @@ const fearFill = document.querySelector('#fear-fill');
 const keyCounter = document.querySelector('#key-counter');
 const messageFeed = document.querySelector('#message-feed');
 const jumpscare = document.querySelector('#jumpscare');
+const jumpscareSprite = document.querySelector('#jumpscare-sprite');
 const bloodFlash = document.querySelector('#blood-flash');
 const weaponView = document.querySelector('#weapon-view');
 const TEST_MODE = new URLSearchParams(window.location.search).has('test')
@@ -38,6 +39,8 @@ const MOVE_SPEED = 3.05;
 const LOOK_SENS = 0.0031;
 const DOG_RADIUS = 0.22;
 const KEY_TOTAL = 3;
+const MUTT_DAISY_WIDTH = 34;
+const MUTT_DAISY_HEIGHT = 32;
 
 const startCell = { c: 1, r: 1 };
 const exitCell = { c: 23, r: 1 };
@@ -108,6 +111,7 @@ const sprayGroup = new THREE.Group();
 const dogGroup = new THREE.Group();
 scene.add(wallGroup, propGroup, keyGroup, sprayGroup, dogGroup);
 let dogApparition = null;
+renderJumpscareSprite();
 
 const ambient = new THREE.HemisphereLight(0xd4dfcf, 0x080705, 0.31);
 scene.add(ambient);
@@ -1013,124 +1017,75 @@ function createDogApparition() {
     depthWrite: false,
     blending: THREE.AdditiveBlending
   });
-  dogApparition = new THREE.Mesh(new THREE.PlaneGeometry(1.15, 1.58), material);
+  dogApparition = new THREE.Mesh(new THREE.PlaneGeometry(1.42, 1.34), material);
   dogApparition.visible = false;
   dogApparition.renderOrder = 6;
   scene.add(dogApparition);
 }
 
+function renderJumpscareSprite() {
+  if (!jumpscareSprite) return;
+  const ctx = jumpscareSprite.getContext('2d');
+  if (!ctx) return;
+  ctx.clearRect(0, 0, MUTT_DAISY_WIDTH, MUTT_DAISY_HEIGHT);
+  drawMuttDaisySprite(ctx, 1, 0, 0);
+}
+
+function drawMuttDaisySprite(ctx, scale = 1, ox = 0, oy = 0) {
+  ctx.imageSmoothingEnabled = false;
+  const px = (color, x, y, w, h) => {
+    ctx.fillStyle = color;
+    ctx.fillRect(ox + x * scale, oy + y * scale, w * scale, h * scale);
+  };
+
+  // Exact Daisy dog_0 construction from the local MUTT project BootScene.
+  px('#8b6c42', 6, 10, 22, 14);
+  px('#a0845c', 8, 11, 18, 4);
+  px('#ffffff', 10, 18, 10, 6);
+  px('#b8944e', 10, 2, 14, 12);
+  px('#8b6c42', 12, 2, 10, 5);
+  px('#8b6c42', 10, 0, 4, 5);
+  px('#8b6c42', 20, 0, 4, 5);
+  px('#c9a66b', 11, 1, 2, 3);
+  px('#c9a66b', 21, 1, 2, 3);
+  px('#111111', 13, 6, 3, 3);
+  px('#111111', 19, 6, 3, 3);
+  px('#222222', 14, 7, 1, 1);
+  px('#222222', 20, 7, 1, 1);
+  px('#3d2b1f', 16, 10, 3, 2);
+  px('#ffffff', 17, 12, 2, 2);
+  px('#a0845c', 4, 14, 3, 8);
+  px('#a0845c', 27, 14, 3, 8);
+  px('#b8944e', 8, 24, 4, 6);
+  px('#b8944e', 22, 24, 4, 6);
+  px('#ffffff', 8, 28, 4, 2);
+  px('#ffffff', 22, 28, 4, 2);
+  px('#8b6c42', 26, 8, 4, 3);
+  px('#8b6c42', 28, 5, 3, 5);
+  px('#a0845c', 29, 6, 2, 3);
+}
+
 function makeDaisyApparitionTexture() {
-  const size = 512;
+  const scale = 16;
   const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
+  canvas.width = MUTT_DAISY_WIDTH * scale;
+  canvas.height = MUTT_DAISY_HEIGHT * scale;
   const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, size, size);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawMuttDaisySprite(ctx, scale, 0, 0);
 
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-  ctx.beginPath();
-  ctx.ellipse(256, 296, 124, 154, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = 'rgba(107, 66, 38, 0.98)';
-  ctx.beginPath();
-  ctx.moveTo(158, 214);
-  ctx.lineTo(122, 72);
-  ctx.lineTo(206, 146);
-  ctx.closePath();
-  ctx.moveTo(354, 214);
-  ctx.lineTo(390, 72);
-  ctx.lineTo(306, 146);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.fillStyle = 'rgba(160, 132, 92, 0.9)';
-  ctx.beginPath();
-  ctx.moveTo(157, 183);
-  ctx.lineTo(139, 109);
-  ctx.lineTo(184, 150);
-  ctx.closePath();
-  ctx.moveTo(355, 183);
-  ctx.lineTo(373, 109);
-  ctx.lineTo(328, 150);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.fillStyle = 'rgba(139, 108, 66, 0.96)';
-  ctx.beginPath();
-  ctx.ellipse(256, 232, 134, 126, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = 'rgba(42, 27, 18, 0.9)';
-  ctx.beginPath();
-  ctx.ellipse(256, 186, 72, 44, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = 'rgba(160, 132, 92, 0.94)';
-  ctx.beginPath();
-  ctx.ellipse(256, 302, 82, 62, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = 'rgba(244, 240, 230, 0.82)';
-  for (const [x, y, r] of [
-    [202, 282, 8],
-    [316, 276, 7],
-    [238, 344, 6],
-    [296, 350, 8],
-    [186, 214, 5],
-    [334, 221, 5],
-    [252, 176, 4]
-  ]) {
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
+  ctx.fillStyle = 'rgba(120, 0, 0, 0.08)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+  for (let y = 0; y < canvas.height; y += scale * 2) {
+    ctx.fillRect(0, y, canvas.width, Math.max(1, scale * 0.12));
   }
 
-  ctx.fillStyle = 'rgba(4, 2, 1, 0.98)';
-  ctx.beginPath();
-  ctx.ellipse(256, 284, 18, 12, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.strokeStyle = 'rgba(6, 2, 1, 0.86)';
-  ctx.lineWidth = 7;
-  ctx.beginPath();
-  ctx.moveTo(244, 322);
-  ctx.quadraticCurveTo(256, 335, 269, 322);
-  ctx.stroke();
-
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
-  ctx.beginPath();
-  ctx.moveTo(280, 320);
-  ctx.lineTo(309, 321);
-  ctx.lineTo(292, 383);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.fillStyle = 'rgba(255, 221, 86, 0.96)';
-  ctx.shadowColor = 'rgba(255, 176, 62, 0.85)';
-  ctx.shadowBlur = 20;
-  for (const x of [211, 301]) {
-    ctx.beginPath();
-    ctx.arc(x, 222, 18, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(2, 0, 0, 0.94)';
-    ctx.beginPath();
-    ctx.arc(x, 222, 9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255, 221, 86, 0.96)';
-  }
-  ctx.shadowBlur = 0;
-
-  ctx.strokeStyle = 'rgba(255,255,255,0.13)';
-  ctx.lineWidth = 2;
-  for (let y = 72; y < size - 44; y += 22) {
-    ctx.beginPath();
-    ctx.moveTo(80 + rng() * 24, y);
-    ctx.lineTo(432 - rng() * 24, y + rng() * 5);
-    ctx.stroke();
-  }
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
   return texture;
 }
 
